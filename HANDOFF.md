@@ -50,7 +50,7 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
   Thread, Team-Rolle + Ersteller werden per `thread.add_user` hinzugefügt). „Schließen“ im Thread
   sperrt ihn und schickt den Verlauf als `.txt` in den Log-Kanal (`tickets`-Tabelle für
   Kurzverlauf/Statistik später).
-- **Web-Dashboard**: `bot/cogs/dashboard.py`, eigener aiohttp-Server (Port 8788). Login per
+- **Web-Dashboard**: `bot/cogs/dashboard.py`, eigener aiohttp-Server (Port 8789). Login per
   Discord-OAuth2 (nur Scope `identify`, Rolle wird danach über den Bot selbst geprüft — keine
   weiteren Nutzer-Rechte nötig). Zugriff nur für die per `/setup dashboard` festgelegte Rolle
   (Fallback: „Server verwalten“). Deckt alle einfachen Schlüssel/Wert-Einstellungen ab

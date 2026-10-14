@@ -12,7 +12,7 @@ Zwei unabhängige Wege, je nachdem ob DeckBar selbst geändert wurde:
    Spielernamen stehen hier nur im angehängten Bild, nicht im Text — kein Namens-Filter möglich.
 
 2. **API** (braucht eine Änderung an DeckBar, die an gamunex geht): `POST /api/aion/fight` auf
-   diesem Server (Port 8788, siehe `bot/cogs/dashboard.py`) nimmt strukturierte Lauf-Daten mit
+   diesem Server (Port 8789, siehe `bot/cogs/dashboard.py`) nimmt strukturierte Lauf-Daten mit
    echten Spielernamen/Schaden entgegen, merged mehrere Meldungen desselben Laufs zu einer
    Rangliste und postet genau einmal ein eigenes Embed. Schutz über einen gemeinsamen Token
    (`/aion token`), da der Endpunkt über Cloudflare öffentlich erreichbar ist.

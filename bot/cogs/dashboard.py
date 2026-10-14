@@ -1,6 +1,6 @@
 """Web-Dashboard: Einstellungen im Browser statt in Discord, mit Discord-Login.
 
-Läuft als eigener aiohttp-Server im Bot (Port 8788, s. DASHBOARD_PORT). Login per Discord-OAuth2
+Läuft als eigener aiohttp-Server im Bot (Port 8789, s. DASHBOARD_PORT). Login per Discord-OAuth2
 (Scope nur "identify" — der Bot prüft die Rolle danach selbst über seinen eigenen Zugriff auf den
 Server, es braucht also keine weiteren OAuth-Rechte vom Nutzer). Zugriff nur für Mitglieder mit der
 per `/setup dashboard` festgelegten Rolle, ohne die: nur wer „Server verwalten“ hat.
@@ -33,7 +33,7 @@ from discord.ext import commands
 
 log = logging.getLogger(__name__)
 
-DEFAULT_PORT = 8788
+DEFAULT_PORT = 8789
 SESSION_TTL = 24 * 3600
 API = "https://discord.com/api/v10"
 CLASS_EMOJI_NOTIFY = "🔔"
