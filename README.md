@@ -150,6 +150,10 @@ Assistenten für neue GitHub-Benachrichtigungen gibt's bewusst nur in Discord.
    das: nur wer „Server verwalten“ hat).
 4. Port 8788 ist in `docker-compose.yml` schon freigegeben. Aufrufen: `http://<DASHBOARD_HOST>:8788`.
 
+Unter **Sichtbarkeit** gibt's zusätzlich eine Matrix (Kanal/Kategorie × Rolle): zeigt live, wer was
+sehen kann, Klick auf eine Zelle schaltet die Sichtbarkeit sofort um (nur „Sehen“, keine anderen
+Rechte). Zeigt nur echte Mitglieder-Rollen, keine bot-eigenen Integrations-Rollen.
+
 Läuft über HTTP ohne eigenes TLS — nur fürs LAN/Tailscale gedacht, nicht fürs offene Internet.
 Sessions gehen bei jedem Neustart des Bots verloren (dann einfach neu einloggen).
 

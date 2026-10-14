@@ -258,6 +258,40 @@ def test_ticket_panel_custom_ids_roundtrip():
         assert cid[len(PANEL_PREFIX):] in KINDS
 
 
+def test_role_can_view():
+    import discord
+
+    from bot.cogs.dashboard import role_can_view
+
+    class FakeChannel:
+        def __init__(self, overwrites):
+            self._ow = overwrites
+
+        def overwrites_for(self, target):
+            return self._ow.get(target, discord.PermissionOverwrite())
+
+    class FakeRole:
+        def __init__(self, perms):
+            self.permissions = perms
+
+    everyone = FakeRole(discord.Permissions(view_channel=True))
+    role = FakeRole(discord.Permissions.none())
+
+    # Kein Overwrite: @everyone darf sehen (Basisrecht), also auch diese Rolle
+    assert role_can_view(FakeChannel({}), role, everyone) is True
+
+    # @everyone per Overwrite ausgeschlossen, Rolle ohne eigenes Overwrite -> nicht sichtbar
+    ch = FakeChannel({everyone: discord.PermissionOverwrite(view_channel=False)})
+    assert role_can_view(ch, role, everyone) is False
+
+    # @everyone ausgeschlossen, Rolle aber explizit erlaubt -> rollen-spezifisch gewinnt
+    ch = FakeChannel({
+        everyone: discord.PermissionOverwrite(view_channel=False),
+        role: discord.PermissionOverwrite(view_channel=True),
+    })
+    assert role_can_view(ch, role, everyone) is True
+
+
 def test_dashboard_login_redirect():
     import os
 

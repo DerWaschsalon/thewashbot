@@ -55,7 +55,7 @@ def esc(text) -> str:
 NAV = [
     ("/", "Übersicht"), ("/general", "Allgemein"), ("/verification", "Verifizierung"),
     ("/tickets", "Tickets"), ("/dps", "DPS-Webhook"), ("/warnings", "Verwarnungen"),
-    ("/notifications", "Benachrichtigungen"),
+    ("/notifications", "Benachrichtigungen"), ("/matrix", "Sichtbarkeit"),
 ]
 
 
@@ -100,6 +100,13 @@ def layout(title: str, body: str, *, user: dict | None = None, active: str = "",
   .row-form {{ display: inline; }}
   code {{ background: rgba(128,128,128,.15); padding: 2px 5px; border-radius: 4px; }}
   .checklist label {{ font-weight: 400; display: flex; align-items: center; gap: 6px; margin: 4px 0; }}
+  table.matrix {{ white-space: nowrap; }}
+  table.matrix th, table.matrix td {{ text-align: center; padding: 3px 6px; }}
+  table.matrix th:first-child, table.matrix td:first-child {{ text-align: left; position: sticky; left: 0;
+            background: inherit; }}
+  table.matrix form {{ margin: 0; }}
+  button.cell-btn {{ background: none; border: none; padding: 2px; margin: 0; font-size: 1.1rem; cursor: pointer;
+            line-height: 1; }}
 </style></head><body>
 <header><div><strong>🧺 TheWashBot</strong></div><nav>{nav_html}</nav><div>{user_html}</div></header>
 <main>{flash_html}<h1>{esc(title)}</h1>{body}</main>
@@ -130,6 +137,26 @@ def role_checklist(guild: discord.Guild, name: str, selected_ids: list[int]) -> 
     return f'<div class="checklist">{"".join(rows)}</div>'
 
 
+def visible_roles(guild: discord.Guild) -> list[discord.Role]:
+    """Echte Mitglieder-Rollen für die Sichtbarkeits-Matrix — ohne @everyone und ohne
+    bot-eigene Integrations-Rollen (TheWashbot, Jellyfin, …), die kann man eh nicht manuell vergeben."""
+    return sorted((r for r in guild.roles if not r.is_default() and not r.managed), key=lambda r: -r.position)
+
+
+def role_can_view(channel, role: discord.Role, everyone: discord.Role) -> bool:
+    """Könnte ein Mitglied, das nur @everyone + diese eine Rolle hat, den Kanal/die Kategorie
+    sehen? (Admin-Rechte/Owner-Status bleiben hier bewusst außen vor — reine Rollen-Perspektive.)"""
+    base = everyone.permissions.value | role.permissions.value
+    VIEW = 1 << 10
+    for target in (everyone, role):
+        ow = channel.overwrites_for(target)
+        if ow.view_channel is False:
+            base &= ~VIEW
+        elif ow.view_channel is True:
+            base |= VIEW
+    return bool(base & VIEW)
+
+
 class Dashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -152,6 +179,8 @@ class Dashboard(commands.Cog):
             web.get("/notifications", self.page_notifications),
             web.post("/notifications/{id}/toggle", self.post_notification_toggle),
             web.post("/notifications/{id}/delete", self.post_notification_delete),
+            web.get("/matrix", self.page_matrix),
+            web.post("/matrix/toggle", self.post_matrix_toggle),
         ])
         self.runner = web.AppRunner(app)
         await self.runner.setup()
@@ -614,6 +643,86 @@ class Dashboard(commands.Cog):
         feed_id = int(request.match_info["id"])
         await self.db.execute("DELETE FROM feeds WHERE id=?", (feed_id,))
         return self._redirect("/notifications", "Gelöscht.")
+
+    # ---- Sichtbarkeits-Matrix ------------------------------------------------------------------
+
+    async def page_matrix(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        everyone = guild.default_role
+        roles = visible_roles(guild)
+
+        def cell(channel, role) -> str:
+            can_view = role_can_view(channel, role, everyone)
+            return (
+                f'<form method="post" action="/matrix/toggle">'
+                f'<input type="hidden" name="channel_id" value="{channel.id}">'
+                f'<input type="hidden" name="role_id" value="{role.id}">'
+                f'<input type="hidden" name="allow" value="{0 if can_view else 1}">'
+                f'<button type="submit" class="cell-btn" title="{esc(channel.name)} / {esc(role.name)}">'
+                f'{"✅" if can_view else "⬜"}</button></form>'
+            )
+
+        def row(channel, indent: bool) -> str:
+            name = f'↳ #{esc(channel.name)}' if indent else f'<strong>📁 {esc(channel.name)}</strong>'
+            cells = "".join(f"<td>{cell(channel, r)}</td>" for r in roles)
+            return f"<tr><td>{name}</td>{cells}</tr>"
+
+        rows = []
+        categories = sorted((c for c in guild.categories), key=lambda c: c.position)
+        for cat in categories:
+            rows.append(row(cat, indent=False))
+            children = sorted(
+                (c for c in cat.channels if c.type in (discord.ChannelType.text, discord.ChannelType.voice)),
+                key=lambda c: c.position,
+            )
+            rows.extend(row(c, indent=True) for c in children)
+        uncategorized = sorted(
+            (c for c in guild.channels if c.category is None
+             and c.type in (discord.ChannelType.text, discord.ChannelType.voice)),
+            key=lambda c: c.position,
+        )
+        if uncategorized:
+            rows.append('<tr><td><strong>📁 (ohne Kategorie)</strong></td>' + "<td></td>" * len(roles) + "</tr>")
+            rows.extend(row(c, indent=True) for c in uncategorized)
+
+        header = "<th>Kanal</th>" + "".join(f"<th>{esc(r.name)}</th>" for r in roles)
+        body = (
+            '<div class="card hint">✅ = diese Rolle sieht den Kanal/die Kategorie gerade (nur Sehen, '
+            "keine anderen Rechte). Klick zum Umschalten — wirkt sofort auf dem Server. 📁-Zeilen sind "
+            "Kategorien, darunter ihre Kanäle.</div>"
+            f'<div class="card" style="overflow-x:auto"><table class="matrix"><tr>{header}</tr>{"".join(rows)}</table></div>'
+        )
+        return web.Response(
+            text=layout("Sichtbarkeit", body, user=self._user_ctx(request), active="/matrix", flash=self._flash(request)),
+            content_type="text/html",
+        )
+
+    async def post_matrix_toggle(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        member, guild = result
+        form = await request.post()
+        try:
+            channel_id = int(form["channel_id"])
+            role_id = int(form["role_id"])
+            allow = form["allow"] == "1"
+        except (KeyError, ValueError):
+            return self._redirect("/matrix", "Ungültige Anfrage.")
+        channel = guild.get_channel(channel_id)
+        role = guild.get_role(role_id)
+        if not channel or not role:
+            return self._redirect("/matrix", "Kanal oder Rolle nicht gefunden.")
+        try:
+            await channel.set_permissions(
+                role, view_channel=allow, reason=f"Dashboard: {member}"
+            )
+        except discord.HTTPException as e:
+            return self._redirect("/matrix", f"Fehler: {e}")
+        return self._redirect("/matrix", f"{'Sichtbar' if allow else 'Versteckt'}: {channel.name} / {role.name}")
 
 
 async def setup(bot):
