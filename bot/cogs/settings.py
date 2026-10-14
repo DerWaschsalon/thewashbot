@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from .cleanup import Confirm
+from .dps import ensure_webhook, webhook_url
 from ..errors import UserError
 
 log = logging.getLogger(__name__)
@@ -209,6 +210,30 @@ class TempVoiceView(discord.ui.View):
         self.add_item(BackButton(panel))
 
 
+class DpsWebhookSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Kanal für DeckBar-Gruppen-DPS wählen …", channel_types=[discord.ChannelType.text],
+                         row=0, custom_id="setup:select:dps_webhook")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = self.values[0]
+        token = await ensure_webhook(self.panel.cog.db, interaction.guild_id, channel.id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
+        await interaction.followup.send(
+            f"Gruppen-DPS geht jetzt nach {channel.mention}.\n\nURL für die DeckBar-Einstellungen:\n"
+            f"`{webhook_url(token)}`\n\nGeheim halten — wer die URL hat, kann hier posten.",
+            ephemeral=True,
+        )
+
+
+class DpsWebhookView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(DpsWebhookSelect(panel))
+        self.add_item(BackButton(panel))
+
+
 class AntispamView(discord.ui.View):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(timeout=None if panel.persistent else 180)
@@ -292,6 +317,11 @@ class SettingsPanel(discord.ui.View):
     async def antispam(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=AntispamView(self))
 
+    @discord.ui.button(label="DPS-Webhook", emoji="⚔️", style=discord.ButtonStyle.secondary, row=2,
+                       custom_id="setup:open:dps_webhook")
+    async def dps_webhook(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=DpsWebhookView(self))
+
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
 
@@ -323,6 +353,7 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="DJ-Rolle", value=fmt_role(guild, db.get_int(guild.id, "dj_role")))
         e.add_field(name="Spamschutz", value="an" if db.get_bool(guild.id, "antispam", True) else "aus")
         e.add_field(name="Einladungslinks", value="erlaubt" if db.get_bool(guild.id, "allow_invites") else "werden gelöscht")
+        e.add_field(name="DPS-Webhook (DeckBar)", value=fmt_channel(guild, db.get_int(guild.id, "dps_webhook_channel")))
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -552,6 +583,15 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         await regel_kanal.send(embed=panel_embed, view=VerifyPanelView())
         await interaction.edit_original_response(
             content=f"✅ Verifizierung eingerichtet. Panel steht in {regel_kanal.mention}.", embed=None, view=None
+        )
+
+    @app_commands.command(name="dps-webhook", description="Kanal für DeckBar-Gruppen-DPS festlegen")
+    @app_commands.describe(kanal="Kanal, in den die Gruppen-DPS nach jedem Kampf gepostet wird")
+    async def dps_webhook_cmd(self, interaction: discord.Interaction, kanal: discord.TextChannel):
+        token = await ensure_webhook(self.db, interaction.guild_id, kanal.id)
+        await interaction.response.send_message(
+            f"Gruppen-DPS geht jetzt nach {kanal.mention}.\n\nURL für die DeckBar-Einstellungen:\n"
+            f"`{webhook_url(token)}`\n\nGeheim halten — wer die URL hat, kann hier posten.", ephemeral=True,
         )
 
     @commands.Cog.listener()

@@ -38,7 +38,7 @@ def test_all_commands_register():
                      "setup log-kanal", "setup temp-voice", "setup panel", "setup management-kanal",
                      "setup verifizierung", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
-                     "erinnere", "erinnerungen", "erinnerung-loeschen", "dps-webhook",
+                     "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -111,11 +111,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 6  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 7  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 7  # inkl. Schließen
+    assert len(ephemeral.children) == 8  # inkl. Schließen
 
 
 def test_reminder_parsing():

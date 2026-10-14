@@ -17,7 +17,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Temp-Voice** | `/setup temp-voice`, `/vc name/limit/sperren/freigeben/einladen/uebernehmen` | Wer „➕ Kanal erstellen“ betritt, bekommt einen eigenen Sprachkanal, der leer wieder verschwindet. |
 | **Aufräumen** | `/aufraeumen nachrichten`, `/aufraeumen bots`, `/aufraeumen bericht` | Alte Nachrichten löschen (Filter nach Alter, Person, nur Bots), alte Bots entfernen, Bericht über tote Kanäle und leere Rollen. Immer erst mit Vorschau und Bestätigung. |
 | **Erinnerungen** | `/erinnere wann: text: privat:` | Zeit relativ (`2h`, `30m`, `1d2h`) oder absolut (`18:30`, `24.12. 18:00`). `/erinnerungen` zeigt eigene offene Erinnerungen, `/erinnerung-loeschen` entfernt eine. |
-| **DeckBar-Gruppen-DPS** | `/dps-webhook kanal:` | Nimmt den Gruppen-Endstand von [DeckBar](https://github.com/gamunex/deckbar) nach jedem Kampf entgegen und postet ihn als Embed (eine Nachricht pro Gruppe, nicht pro Spieler). Braucht Port 8787 in `docker-compose.yml` und `DPS_WEBHOOK_HOST` in `.env`. |
+| **DeckBar-Gruppen-DPS** | `/setup dps-webhook`, auch im Klick-Panel | Nimmt den Gruppen-Endstand von [DeckBar](https://github.com/gamunex/deckbar) nach jedem Kampf entgegen und postet ihn als Embed (eine Nachricht pro Gruppe, nicht pro Spieler). Braucht Port 8787 in `docker-compose.yml` und `DPS_WEBHOOK_HOST` in `.env`. |
 | **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
@@ -116,8 +116,8 @@ dieses Repos).
 
 1. In `docker-compose.yml` ist Port 8787 schon freigegeben, `.env`: `DPS_WEBHOOK_HOST=<LAN-IP
    dieses Servers>` eintragen (z. B. `192.168.1.20`), damit die angezeigte URL stimmt.
-2. `/dps-webhook kanal:#dps` in Discord ausführen → Antwort enthält die URL
-   (`http://<HOST>:8787/dps/<Token>`), die in die DeckBar-Einstellungen gehört.
+2. `/setup dps-webhook kanal:#dps` in Discord ausführen (oder im Klick-Panel unter „DPS-Webhook“) →
+   Antwort enthält die URL (`http://<HOST>:8787/dps/<Token>`), die in die DeckBar-Einstellungen gehört.
 3. URL geheim halten — wer sie hat, kann in diesem Kanal posten.
 
 ## Entwickeln und testen

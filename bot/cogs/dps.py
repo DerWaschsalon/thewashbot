@@ -18,7 +18,6 @@ import secrets
 
 import discord
 from aiohttp import web
-from discord import app_commands
 from discord.ext import commands
 
 log = logging.getLogger(__name__)
@@ -32,6 +31,22 @@ CLASS_EMOJI = {
 
 def fmt_int(n: int) -> str:
     return f"{n:,}".replace(",", ".")
+
+
+async def ensure_webhook(db, guild_id: int, channel_id: int) -> str:
+    """Legt bei Bedarf einen Token für den Server an, setzt den Zielkanal, gibt den Token zurück."""
+    token = db.get(guild_id, "dps_webhook_token")
+    if not token:
+        token = secrets.token_urlsafe(24)
+        await db.set(guild_id, "dps_webhook_token", token)
+    await db.set(guild_id, "dps_webhook_channel", channel_id)
+    return token
+
+
+def webhook_url(token: str) -> str:
+    host = os.getenv("DPS_WEBHOOK_HOST") or "<LAN-IP-DIESES-SERVERS>"
+    port = os.getenv("DPS_WEBHOOK_PORT", str(DEFAULT_PORT))
+    return f"http://{host}:{port}/dps/{token}"
 
 
 def build_embed(data: dict) -> discord.Embed | None:
@@ -105,27 +120,5 @@ class DpsWebhook(commands.Cog):
         return web.json_response({"ok": True})
 
 
-@app_commands.command(name="dps-webhook", description="Kanal für DeckBar-Gruppen-DPS festlegen")
-@app_commands.describe(kanal="Kanal, in den die Gruppen-DPS nach jedem Kampf gepostet wird")
-@app_commands.default_permissions(manage_guild=True)
-@app_commands.guild_only()
-async def set_dps_webhook(interaction: discord.Interaction, kanal: discord.TextChannel):
-    db = interaction.client.db
-    token = db.get(interaction.guild_id, "dps_webhook_token")
-    if not token:
-        token = secrets.token_urlsafe(24)
-        await db.set(interaction.guild_id, "dps_webhook_token", token)
-    await db.set(interaction.guild_id, "dps_webhook_channel", kanal.id)
-    host = os.getenv("DPS_WEBHOOK_HOST") or "<LAN-IP-DIESES-SERVERS>"
-    port = os.getenv("DPS_WEBHOOK_PORT", str(DEFAULT_PORT))
-    url = f"http://{host}:{port}/dps/{token}"
-    await interaction.response.send_message(
-        f"Gruppen-DPS geht jetzt nach {kanal.mention}.\n\nURL für die DeckBar-Einstellungen:\n`{url}`\n\n"
-        "Geheim halten — wer die URL hat, kann hier posten. `DPS_WEBHOOK_HOST` in der `.env` setzen, "
-        "damit hier die echte IP statt des Platzhalters steht.", ephemeral=True,
-    )
-
-
 async def setup(bot):
     await bot.add_cog(DpsWebhook(bot))
-    bot.tree.add_command(set_dps_webhook)
