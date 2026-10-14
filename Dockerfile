@@ -15,4 +15,5 @@ COPY entrypoint.sh .
 ENV PYTHONUNBUFFERED=1 DB_PATH=/data/bot.sqlite3
 VOLUME /data
 EXPOSE 8787
+EXPOSE 8788
 ENTRYPOINT ["sh", "/app/entrypoint.sh"]

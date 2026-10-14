@@ -33,6 +33,7 @@ def test_all_commands_register():
                     with contextlib.suppress(Exception, asyncio.CancelledError):
                         await task
             await bot.get_cog("DpsWebhook").runner.cleanup()
+            await bot.get_cog("Dashboard").cog_unload()
             await bot.get_cog("Notifications").manager.close()
             await bot.db.close()
             await bot.get_cog("Music").session.close()
@@ -42,7 +43,7 @@ def test_all_commands_register():
                      "setup log-kanal", "setup temp-voice", "setup panel", "setup management-kanal",
                      "setup verifizierung", "setup regeln-text", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
-                     "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook",
+                     "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook", "setup dashboard",
                      "setup tickets", "ticket-panel",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
@@ -255,6 +256,43 @@ def test_ticket_panel_custom_ids_roundtrip():
     # Jede custom_id muss sich eindeutig auf eine bekannte Ticket-Art zurückführen lassen
     for cid in ids:
         assert cid[len(PANEL_PREFIX):] in KINDS
+
+
+def test_dashboard_login_redirect():
+    import os
+
+    from aiohttp.test_utils import make_mocked_request
+
+    from bot.cogs.dashboard import Dashboard
+
+    cog = Dashboard.__new__(Dashboard)  # kein echter Bot/aiohttp-Server nötig für diesen Handler
+    cog._http = None
+
+    async def go():
+        old = os.environ.pop("DISCORD_CLIENT_ID", None)
+        try:
+            resp = await cog.login(make_mocked_request("GET", "/login"))
+            assert resp.status == 500  # fehlende Client-ID wird gemeldet, nicht stillschweigend ignoriert
+
+            os.environ["DISCORD_CLIENT_ID"] = "123"
+            resp = await cog.login(make_mocked_request("GET", "/login"))
+            assert resp.status == 302
+            assert "client_id=123" in resp.headers["Location"]
+            assert "discord.com/oauth2/authorize" in resp.headers["Location"]
+        finally:
+            if old is None:
+                os.environ.pop("DISCORD_CLIENT_ID", None)
+            else:
+                os.environ["DISCORD_CLIENT_ID"] = old
+
+    run(go())
+
+
+def test_dashboard_html_escaping():
+    from bot.cogs.dashboard import esc
+
+    assert esc('<script>alert(1)</script>') == "&lt;script&gt;alert(1)&lt;/script&gt;"
+    assert esc(None) == ""
 
 
 def test_dps_embed():

@@ -533,6 +533,15 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
             "Panel mit `/ticket-panel` posten.", ephemeral=True,
         )
 
+    @app_commands.command(name="dashboard", description="Wer darf das Web-Dashboard öffnen (leer lassen = nur „Server verwalten“)")
+    @app_commands.describe(rolle="Rolle mit Zugriff aufs Dashboard; leer = Rolle entfernen (Fallback: „Server verwalten“)")
+    async def dashboard_settings(self, interaction: discord.Interaction, rolle: discord.Role | None = None):
+        await self.db.set(interaction.guild_id, "dashboard_admin_role", rolle and rolle.id)
+        await interaction.response.send_message(
+            f"Dashboard-Zugriff: {rolle.mention}." if rolle else
+            "Dashboard-Zugriff: nur noch Leute mit „Server verwalten“.", ephemeral=True,
+        )
+
     @app_commands.command(name="temp-voice", description="„Join to create“-Kanal anlegen oder festlegen")
     @app_commands.describe(kanal="Vorhandener Sprachkanal; leer lassen = neuen anlegen", aus="Funktion abschalten")
     async def tempvoice(

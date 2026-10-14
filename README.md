@@ -20,6 +20,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Tickets** | `/setup tickets rolle:` (fügt hinzu/entfernt, mehrere möglich; im Klick-Panel per Mehrfachauswahl), `/ticket-panel` | Panel mit Buttons (❓ Frage, ⚠️ Meldung, 📋 Bewerbung) → Modal → privater Thread mit allen Team-Rollen. „Schließen“ im Thread beendet ihn, sperrt ihn und schickt den Verlauf als `.txt` in den Log-Kanal. |
 | **DeckBar-Gruppen-DPS** | `/setup dps-webhook`, auch im Klick-Panel | Nimmt den Gruppen-Endstand von [DeckBar](https://github.com/gamunex/deckbar) nach jedem Kampf entgegen und postet ihn als Embed (eine Nachricht pro Gruppe, nicht pro Spieler). Braucht Port 8787 in `docker-compose.yml` und `DPS_WEBHOOK_HOST` in `.env`. |
 | **Benachrichtigungen** | Button „🔔 Benachrichtigungen" im Klick-Panel | GitHub-Repos beobachten (Releases, Issues, Pull Requests, Commits) per Klick-Assistent, komplett über Buttons/Select-Menüs/Modals, kein Befehl nötig. Modular für weitere Dienste (YouTube, Twitch, RSS, …) — siehe `bot/notify/`. |
+| **Web-Dashboard** | `/setup dashboard rolle:`, dann `http://<DASHBOARD_HOST>:8788` | Einstellungen im Browser mit Discord-Login, nur für die freigeschaltete Rolle. Siehe „Web-Dashboard einrichten" unten. |
 | **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
@@ -134,6 +135,23 @@ Architektur für weitere Dienste: `bot/notify/base.py` (Schnittstelle `Provider`
 (erster Provider), `bot/notify/manager.py` (Registry + Abfrage/Dedup/Fehlerbehandlung). Ein neuer
 Dienst (YouTube, Twitch, RSS, …) implementiert nur `Provider` und trägt sich in `PROVIDERS` ein —
 die Discord-Oberfläche in `bot/cogs/notifications.py` kennt nichts Dienst-Spezifisches.
+
+## Web-Dashboard einrichten
+
+Einstellungen im Browser statt in Discord, Login mit dem eigenen Discord-Konto. Deckt die
+Einstellungen ab, die einfache Werte sind (Kanäle, Rollen, Texte, An/Aus); den mehrstufigen
+Assistenten für neue GitHub-Benachrichtigungen gibt's bewusst nur in Discord.
+
+1. Im Developer Portal unter **OAuth2** → **Redirects** genau diese URL eintragen:
+   `http://<DASHBOARD_HOST>:<DASHBOARD_PORT>/callback` (Standard-Port 8788).
+2. `.env`: `DISCORD_CLIENT_ID` (General Information → Application ID), `DISCORD_CLIENT_SECRET`
+   (OAuth2 → Client Secret, **geheim**), `DASHBOARD_HOST` (LAN-IP dieses Servers), `DASHBOARD_PORT`.
+3. `/setup dashboard rolle:@Admin` in Discord — nur Mitglieder mit dieser Rolle kommen rein (ohne
+   das: nur wer „Server verwalten“ hat).
+4. Port 8788 ist in `docker-compose.yml` schon freigegeben. Aufrufen: `http://<DASHBOARD_HOST>:8788`.
+
+Läuft über HTTP ohne eigenes TLS — nur fürs LAN/Tailscale gedacht, nicht fürs offene Internet.
+Sessions gehen bei jedem Neustart des Bots verloren (dann einfach neu einloggen).
 
 ## DeckBar-Gruppen-DPS einrichten
 

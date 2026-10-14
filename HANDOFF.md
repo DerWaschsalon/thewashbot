@@ -46,20 +46,25 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
   Installationen, siehe `Database._migrate`). Nächster Dienst (YouTube/Twitch/RSS/…) muss nur
   `Provider` implementieren und sich in `PROVIDERS` eintragen — die Discord-Seite ändert sich nicht.
 - **Tickets**: `bot/cogs/tickets.py`. `/setup tickets rolle:` (auch im Klick-Panel) legt die
-  Team-Rolle fest, `/ticket-panel` postet das Panel (Frage/Meldung/Bewerbung → Modal → privater
+  Team-Rolle(n) fest, `/ticket-panel` postet das Panel (Frage/Meldung/Bewerbung → Modal → privater
   Thread, Team-Rolle + Ersteller werden per `thread.add_user` hinzugefügt). „Schließen“ im Thread
   sperrt ihn und schickt den Verlauf als `.txt` in den Log-Kanal (`tickets`-Tabelle für
   Kurzverlauf/Statistik später).
+- **Web-Dashboard**: `bot/cogs/dashboard.py`, eigener aiohttp-Server (Port 8788). Login per
+  Discord-OAuth2 (nur Scope `identify`, Rolle wird danach über den Bot selbst geprüft — keine
+  weiteren Nutzer-Rechte nötig). Zugriff nur für die per `/setup dashboard` festgelegte Rolle
+  (Fallback: „Server verwalten“). Deckt alle einfachen Schlüssel/Wert-Einstellungen ab
+  (Allgemein, Verifizierung-Text, Tickets, DPS-Webhook, Verwarnungs-Schwelle,
+  Benachrichtigungen an/aus/löschen). Bewusst **nicht** abgedeckt: der mehrstufige
+  GitHub-Benachrichtigungs-Assistent (bleibt in Discord) und die große
+  Verifizierungs-Ersteinrichtung (bleibt `/setup verifizierung` wegen Vorschau/Bestätigung).
+  Sessions nur im Speicher (RAM), gehen bei Neustart verloren.
 
 ## Noch zu bauen (Daves Auswahl)
 
 Gewählt:
 - **Voice-Statistik**: Zeit im Sprachkanal (nicht allein, nicht AFK/taub), optional XP pro Minute.
 - **Starboard**: ⭐ ab Schwelle (Standard 3) → Highlight-Kanal, Zähler aktualisieren.
-- **Web-Dashboard**: aiohttp im selben Prozess. Login per `/dashboard` (Einmal-Link mit signiertem
-  Token, 10 Min. gültig, nur „Server verwalten“), kein OAuth nötig. Formulare aus einem zentralen
-  Schema (geplant: `bot/schema.py` mit Feldern key/label/type/section und Listen für
-  custom_commands, scheduled, feeds, level_rewards), damit `/setup` und Dashboard dieselben Schlüssel nutzen.
 - **Server-Status `/server`** (nur Dave, Env `OWNER_ID`): CPU/RAM/Uptime aus /proc, Plattenplatz
   der gemounteten Unraid-Pfade, Container über den Docker-Socket (optional gemountet, Hinweis: Socket
   = Root-Zugriff). Neustart eines Containers nur mit Bestätigung.

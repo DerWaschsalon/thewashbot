@@ -6,5 +6,6 @@ services:
     env_file: .env
     ports:
       - "8787:8787"   # DeckBar-Gruppen-DPS-Webhook, siehe /setup dps-webhook
+      - "8788:8788"   # Web-Dashboard
     volumes:
       - ./data:/data

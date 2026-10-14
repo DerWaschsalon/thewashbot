@@ -25,6 +25,7 @@ COGS = [
     "bot.cogs.dps",
     "bot.cogs.notifications",
     "bot.cogs.tickets",
+    "bot.cogs.dashboard",
 ]
 
 
