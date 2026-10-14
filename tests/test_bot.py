@@ -258,6 +258,78 @@ def test_ticket_panel_custom_ids_roundtrip():
         assert cid[len(PANEL_PREFIX):] in KINDS
 
 
+def test_aion_api_auth_rejects_bad_requests():
+    from unittest.mock import AsyncMock
+
+    from aiohttp.test_utils import make_mocked_request
+
+    from bot.cogs.aion_dedup import AionDedup
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+            await db.set(1, "aion_api_token", "secret123")
+            await db.set(1, "aion_channel", 999)
+            cog = AionDedup.__new__(AionDedup)
+            cog.bot = type("B", (), {"get_cog": lambda self, name: None})()
+            cog.db = db
+            cog.api_pending = {}
+
+            # Kein Authorization-Header -> 401, kein Crash durch das String-Slicing
+            req = make_mocked_request("POST", "/api/aion/fight")
+            resp = await cog.handle_api_fight(req)
+            assert resp.status == 401
+
+            # Falscher Token -> 401
+            req = make_mocked_request("POST", "/api/aion/fight", headers={"Authorization": "Bearer falsch"})
+            resp = await cog.handle_api_fight(req)
+            assert resp.status == 401
+
+            await db.close()
+
+    run(go())
+
+
+def test_aion_api_merge_and_embed():
+    from bot.cogs.aion_dedup import build_run_embed, fmt_dps, fmt_num, merge_players, same_api_run, validate_fight_payload
+
+    assert fmt_num(13_290_000) == "13.29M"
+    assert fmt_num(8_080) == "8.1k"
+    assert fmt_dps(38_000) == "38.0k/s"
+
+    base = {"dungeon": "Ferocious Horn Den", "bosses_total": 3, "bosses_killed": 3,
+            "start_ms": 1_760_445_123_000, "fight_ms": 350_000,
+            "players": [{"name": "ReZero", "damage": 13_000_000, "dps": 37_000}]}
+    assert validate_fight_payload(base) is None
+    assert validate_fight_payload({"dungeon": "X"}) is not None
+    assert validate_fight_payload({**base, "players": []}) is not None
+
+    # Zweite Meldung desselben Laufs, leicht abweichende Startzeit/Dauer -> trotzdem derselbe Lauf
+    report2 = {**base, "start_ms": base["start_ms"] + 2_000, "fight_ms": base["fight_ms"] - 1_500,
+              "players": [{"name": "Gamunex", "damage": 8_000_000, "dps": 23_000}]}
+    assert same_api_run(base, report2)
+
+    # 20 Minuten später, sonst identisch -> nicht derselbe Lauf
+    later = {**base, "start_ms": base["start_ms"] + 20 * 60_000}
+    assert not same_api_run(base, later)
+
+    # Merge: gleicher Spielername in zwei Meldungen -> höherer Schaden gewinnt, sortiert absteigend
+    reportA = {**base, "players": [{"name": "ReZero", "damage": 13_000_000, "dps": 37_000},
+                                   {"name": "Gamunex", "damage": 8_000_000, "dps": 23_000}]}
+    reportB = {**base, "players": [{"name": "ReZero", "damage": 13_290_000, "dps": 38_000},  # höher -> gewinnt
+                                   {"name": "Haze", "damage": 5_080_000, "dps": 14_500}]}
+    players = merge_players([reportA, reportB])
+    assert [p["name"] for p in players] == ["ReZero", "Gamunex", "Haze"]
+    assert players[0]["damage"] == 13_290_000  # der höhere der beiden gemeldeten Werte
+
+    embed = build_run_embed(base, players, reporters=2)
+    assert "Ferocious Horn Den" in embed.title
+    assert "🥇 **ReZero**" in embed.description
+    assert "2 DeckBar-Meldung" in embed.footer.text
+
+
 def test_aion_parse_and_match():
     from bot.cogs.aion_dedup import parse_run, same_run
 

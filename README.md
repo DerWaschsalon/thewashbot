@@ -21,7 +21,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **DeckBar-Gruppen-DPS** | `/setup dps-webhook`, auch im Klick-Panel | Nimmt den Gruppen-Endstand von [DeckBar](https://github.com/gamunex/deckbar) nach jedem Kampf entgegen und postet ihn als Embed (eine Nachricht pro Gruppe, nicht pro Spieler). Braucht Port 8787 in `docker-compose.yml` und `DPS_WEBHOOK_HOST` in `.env`. |
 | **Benachrichtigungen** | Button „🔔 Benachrichtigungen" im Klick-Panel | GitHub-Repos beobachten (Releases, Issues, Pull Requests, Commits) per Klick-Assistent, komplett über Buttons/Select-Menüs/Modals, kein Befehl nötig. Modular für weitere Dienste (YouTube, Twitch, RSS, …) — siehe `bot/notify/`. |
 | **Web-Dashboard** | `/setup dashboard rolle:`, dann `http://<DASHBOARD_HOST>:8788` | Einstellungen im Browser mit Discord-Login, nur für die freigeschaltete Rolle. Siehe „Web-Dashboard einrichten" unten. |
-| **AION-2-Duplikatfilter** | `/aion kanal:` | Erkennt mehrere DeckBar-Posts vom selben Dungeon-Lauf (mehrere Mitspieler, eigenes DeckBar je Person) und behält nur einen. Siehe „AION-2-Duplikatfilter einrichten" unten. |
+| **AION-2** | `/aion kanal:`, `/aion token:True` | Mehrere DeckBar-Posts vom selben Dungeon-Lauf zu einem zusammenführen — per Duplikatfilter (ohne DeckBar-Änderung) oder per API mit Rangliste (braucht DeckBar-Änderung). Siehe „AION-2: mehrere DeckBar-Posts zu einem zusammenführen" unten. |
 | **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
@@ -137,25 +137,57 @@ Architektur für weitere Dienste: `bot/notify/base.py` (Schnittstelle `Provider`
 Dienst (YouTube, Twitch, RSS, …) implementiert nur `Provider` und trägt sich in `PROVIDERS` ein —
 die Discord-Oberfläche in `bot/cogs/notifications.py` kennt nichts Dienst-Spezifisches.
 
-## AION-2-Duplikatfilter einrichten
+## AION-2: mehrere DeckBar-Posts zu einem zusammenführen
 
 Wenn mehrere Leute gemeinsam denselben Dungeon laufen und jeder sein eigenes
 [DeckBar](https://github.com/gamunex/deckbar) hat, postet sonst jeder seinen eigenen Dungeon-Run
-in Discord. Der Bot erkennt das und behält nur den zuerst angekommenen Post, löscht die restlichen
-— **ohne** DeckBar selbst zu ändern und **ohne** eigenes Gruppensystem/API/WebUI.
+in Discord. Zwei unabhängige Wege, je nachdem ob DeckBar angepasst wird:
 
-1. In Discord: Kanal-Einstellungen → Integrationen → Webhook erstellen → URL kopieren (das ist
-   normale Discord-Funktion, nicht vom Bot).
+### Variante 1: ohne DeckBar zu ändern
+
+Der Bot behält nur den zuerst angekommenen Post, löscht die restlichen — kein Eingriff in DeckBar,
+kein eigenes Gruppensystem/API/WebUI.
+
+1. In Discord: Kanal-Einstellungen → Integrationen → Webhook erstellen → URL kopieren (normale
+   Discord-Funktion, nicht vom Bot).
 2. Diese Webhook-URL trägt **jeder** in seinem eigenen DeckBar ein: Web-UI → Karte
    „Dungeon-Runs → Discord“ (oder `~/.config/deckbar/runs.yaml`, Feld `webhook`). DeckBar postet
-   dann wie gewohnt selbst, ganz ohne unseren Bot zu kennen.
+   dann wie gewohnt selbst, ganz ohne den Bot zu kennen.
 3. `/aion kanal:#der-kanal` in Discord — ab da beobachtet der Bot diesen Kanal und filtert Duplikate.
-   Optional `wartezeit:` (Sekunden, Standard 15) — wie lange auf weitere Posts vom selben Lauf
-   gewartet wird, bevor der erste veröffentlicht bleibt.
 
 Erkennung: gleicher Dungeon-Name, gleiche Boss-Anzahl/-Siege, Kampfzeit und Startzeit nah beieinander
 (DeckBars Text hat nur Minuten-Genauigkeit bei der Startzeit). Ein Spieler-Filter nach Namen ist
-**nicht** möglich — die Spielernamen stehen nur im angehängten Bild, nicht im Text der Nachricht.
+hier **nicht** möglich — die Spielernamen stehen nur im angehängten Bild, nicht im Text der Nachricht.
+
+### Variante 2: API (braucht eine Änderung an DeckBar)
+
+Statt Discord-Posten zu filtern, schickt DeckBar strukturierte Lauf-Daten (echte Spielernamen,
+Schaden, DPS) an einen Endpunkt auf diesem Server. Der Bot merged mehrere Meldungen desselben
+Laufs zu einer Rangliste und postet einmal selbst ein Embed (🥇🥈🥉-Format). Braucht eine Änderung
+an DeckBar (bei `daemon/deckbar_daemon/runs.py`, dort wo `post_discord` aufgerufen wird), die noch
+nicht umgesetzt ist — siehe `HANDOFF.md`.
+
+1. `AION_PUBLIC_URL` in der `.env` setzen (öffentliche Adresse, z. B. per Cloudflare Tunnel auf
+   `DASHBOARD_PORT`, ohne Pfad/Slash am Ende) und `/aion kanal:` wie oben einrichten.
+2. `/aion token:True` in Discord — erzeugt bzw. erneuert den API-Token und zeigt die volle
+   Endpunkt-URL. Geheim halten, nur an teilnehmende DeckBar-Instanzen geben.
+3. Jede teilnehmende DeckBar-Installation sendet pro abgeschlossenem Lauf:
+
+   ```
+   POST <AION_PUBLIC_URL>/api/aion/fight
+   Authorization: Bearer <Token aus /aion token:True>
+   Content-Type: application/json
+
+   {
+     "dungeon": "Ferocious Horn Den", "difficulty": "Normal",
+     "bosses_total": 3, "bosses_killed": 3,
+     "start_ms": 1760445123000, "fight_ms": 350000,
+     "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}, …]
+   }
+   ```
+
+Beide Varianten laufen unabhängig nebeneinander — schadet nichts, beide gleichzeitig eingerichtet
+zu haben.
 
 ## Web-Dashboard einrichten
 

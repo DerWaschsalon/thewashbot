@@ -181,6 +181,7 @@ class Dashboard(commands.Cog):
             web.post("/notifications/{id}/delete", self.post_notification_delete),
             web.get("/matrix", self.page_matrix),
             web.post("/matrix/toggle", self.post_matrix_toggle),
+            web.post("/api/aion/fight", self.api_aion_fight),
         ])
         self.runner = web.AppRunner(app)
         await self.runner.setup()
@@ -723,6 +724,14 @@ class Dashboard(commands.Cog):
         except discord.HTTPException as e:
             return self._redirect("/matrix", f"Fehler: {e}")
         return self._redirect("/matrix", f"{'Sichtbar' if allow else 'Versteckt'}: {channel.name} / {role.name}")
+
+    # ---- AION-2-API (eigener Bearer-Token, kein Discord-Login) -----------------------------
+
+    async def api_aion_fight(self, request: web.Request) -> web.Response:
+        aion = self.bot.get_cog("AionDedup")
+        if aion is None:
+            return web.json_response({"error": "AION-Modul nicht geladen"}, status=503)
+        return await aion.handle_api_fight(request)
 
 
 async def setup(bot):

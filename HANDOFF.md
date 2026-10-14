@@ -104,3 +104,30 @@ Fork `Navonex/deckbar`:
 - Neue Einstellung (Webhook-URL) in `dps.yaml` + Web-UI (`daemon/deckbar_daemon/web/`).
 - Payload-Format, das der Bot erwartet: siehe `bot/cogs/dps.py` im thewashbot-Repo
   (`{"target": …, "duration_s": …, "party": [{"name", "cls", "dps", "dmg", "pct"}]}`).
+
+## Offen: DeckBar-Seite der AION-2-Run-Zusammenführung (separates Feature)
+
+Eigenständig von der Gruppen-DPS-Integration oben: Dave will zusätzlich, dass DeckBar nach einem
+abgeschlossenen Dungeon-Lauf (nicht nach jedem Kampf) die Lauf-Daten an `/api/aion/fight`
+(`bot/cogs/dashboard.py` + `bot/cogs/aion_dedup.py`, Auth per Bearer-Token aus `/aion token:True`)
+schickt, damit der Bot mehrere Meldungen vom selben Lauf (verschiedene Spieler, je eigenes DeckBar)
+zu einer Rangliste zusammenführt und einmal postet. Bot-Seite ist fertig, DeckBar-Seite noch offen.
+Bis dahin funktioniert der einfachere Duplikatfilter ohne DeckBar-Änderung (`/aion kanal:`,
+`bot/cogs/aion_dedup.py` on_message) bereits eigenständig.
+
+Ansatzpunkt in DeckBar: `daemon/deckbar_daemon/runs.py`, Funktion `post_discord` wird nach einem
+abgeschlossenen `Run` aufgerufen (siehe `DungeonRuns`-Klasse, Zeile ~928). Dort zusätzlich (nicht
+statt) ein `POST` an die neue Bot-URL mit dem erwarteten Payload:
+
+```json
+{
+  "dungeon": "Ferocious Horn Den", "difficulty": "Normal",
+  "bosses_total": 3, "bosses_killed": 3,
+  "start_ms": 1760445123000, "fight_ms": 350000,
+  "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}]
+}
+```
+
+`Run.bosses()` und `Fight.players` liefern die nötigen Werte bereits (siehe `Run`/`Fight`/`Player`-
+Dataclasses in `runs.py`). Neue Einstellung (Bot-URL + Token) in `runs.yaml` + Web-UI ergänzen,
+analog zum bestehenden `webhook`-Feld dort.
