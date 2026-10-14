@@ -26,6 +26,7 @@ COGS = [
     "bot.cogs.notifications",
     "bot.cogs.tickets",
     "bot.cogs.dashboard",
+    "bot.cogs.aion_dedup",
 ]
 
 

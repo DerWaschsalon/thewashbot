@@ -43,7 +43,7 @@ def test_all_commands_register():
                      "setup log-kanal", "setup temp-voice", "setup panel", "setup management-kanal",
                      "setup verifizierung", "setup regeln-text", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
-                     "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook", "setup dashboard",
+                     "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook", "setup dashboard", "aion",
                      "setup tickets", "ticket-panel",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
@@ -256,6 +256,37 @@ def test_ticket_panel_custom_ids_roundtrip():
     # Jede custom_id muss sich eindeutig auf eine bekannte Ticket-Art zurückführen lassen
     for cid in ids:
         assert cid[len(PANEL_PREFIX):] in KINDS
+
+
+def test_aion_parse_and_match():
+    from bot.cogs.aion_dedup import parse_run, same_run
+
+    a = parse_run("**Ferocious Horn Den** – 3/3 Bosse besiegt, Kampfzeit 5:50 (15:42–15:48)")
+    b = parse_run("**Ferocious Horn Den** – 3/3 Bosse besiegt, Kampfzeit 5:48 (15:42–15:48)")
+    c = parse_run("**Ferocious Horn Den** – 3/3 Bosse besiegt, Kampfzeit 5:51 (15:42–15:48)")
+    assert a is not None and a["dungeon"] == "Ferocious Horn Den"
+    assert a["kills"] == 3 and a["total"] == 3 and a["duration_s"] == 350
+    # drei verschiedene DeckBars, minimal abweichende Werte vom selben Lauf -> alle als gleich erkannt
+    assert same_run(a, b) and same_run(a, c) and same_run(b, c)
+
+    # 20 Minuten späterer Re-Run desselben Dungeons -> NICHT zusammenführen
+    later = parse_run("**Ferocious Horn Den** – 3/3 Bosse besiegt, Kampfzeit 5:50 (16:02–16:08)")
+    assert not same_run(a, later)
+
+    # anderer Dungeon -> nie zusammenführen, auch bei gleicher Zeit
+    other_dungeon = parse_run("**Anderer Dungeon** – 3/3 Bosse besiegt, Kampfzeit 5:50 (15:42–15:48)")
+    assert not same_run(a, other_dungeon)
+
+    # andere Boss-Anzahl (z. B. ein Boss noch nicht besiegt) -> nicht derselbe abgeschlossene Lauf
+    partial = parse_run("**Ferocious Horn Den** – 2/3 Bosse besiegt, Kampfzeit 4:10 (15:42–15:46)")
+    assert not same_run(a, partial)
+
+    # Text, der nicht zum DeckBar-Format passt, wird ignoriert statt einen Fehler zu werfen
+    assert parse_run("Irgendeine andere Nachricht") is None
+
+    # Einzahl "Boss" bei genau einem Gegner
+    single = parse_run("**Solo-Boss** – 1/1 Boss besiegt, Kampfzeit 1:23 (10:00–10:01)")
+    assert single is not None and single["total"] == 1
 
 
 def test_role_can_view():
