@@ -14,11 +14,13 @@ import logging
 import re
 import time
 from collections import defaultdict, deque
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from ..errors import UserError
 
 log = logging.getLogger(__name__)
 
@@ -174,8 +176,19 @@ class Moderation(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        await self.log(guild, discord.Embed(title="🔨 Gebannt", colour=discord.Colour.dark_red(),
-                                            description=f"{user.mention} ({user})"))
+        # Grund kommt aus dem Audit-Log, damit /ban (und manuelle Banns über Discord) nur einen
+        # Eintrag erzeugen statt zwei.
+        reason = None
+        if guild.me.guild_permissions.view_audit_log:
+            try:
+                async for entry in guild.audit_logs(action=discord.AuditLogAction.ban, limit=5):
+                    if entry.target and entry.target.id == user.id:
+                        reason = entry.reason
+                        break
+            except discord.HTTPException:
+                pass
+        desc = f"{user.mention} ({user})" + (f"\n{reason}" if reason else "")
+        await self.log(guild, discord.Embed(title="🔨 Gebannt", colour=discord.Colour.dark_red(), description=desc))
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
@@ -215,6 +228,148 @@ class Moderation(commands.Cog):
                           description=f"{mitglied.mention} für {minuten} Min.\nVon {interaction.user.mention}"
                                       + (f"\nGrund: {grund}" if grund else ""))
         await self.log(interaction.guild, e)
+
+    # ---- Verwarnungen ----
+
+    @app_commands.command(name="warn", description="Mitglied verwarnen, mit Grund")
+    @app_commands.describe(grund="Wird im Log und in der Verwarnung selbst vermerkt")
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.guild_only()
+    async def warn(self, interaction: discord.Interaction, mitglied: discord.Member, grund: str):
+        if mitglied.bot:
+            raise UserError("Bots kann ich nicht verwarnen.")
+        await self.db.execute(
+            "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, created) VALUES (?, ?, ?, ?, ?)",
+            (interaction.guild_id, mitglied.id, interaction.user.id, grund, time.time()),
+        )
+        count = len(await self.db.fetchall(
+            "SELECT id FROM warnings WHERE guild_id=? AND user_id=?", (interaction.guild_id, mitglied.id)
+        ))
+        try:
+            await mitglied.send(f"Du wurdest auf **{interaction.guild.name}** verwarnt (Nr. {count}).\n"
+                                f"Grund: {grund}")
+        except discord.HTTPException:
+            pass
+        await interaction.response.send_message(
+            f"{mitglied.mention} verwarnt (Nr. {count}). Grund: {grund}", ephemeral=True
+        )
+        await self.log(interaction.guild, discord.Embed(
+            title=f"⚠️ Verwarnung Nr. {count}", colour=discord.Colour.yellow(),
+            description=f"{mitglied.mention} ({mitglied})\nVon {interaction.user.mention}\nGrund: {grund}",
+        ))
+
+        threshold = self.db.get_int(interaction.guild_id, "warn_threshold")
+        action = self.db.get(interaction.guild_id, "warn_action")
+        if threshold and action and count == threshold:
+            await self._auto_punish(interaction.guild, mitglied, action, count)
+
+    async def _auto_punish(self, guild: discord.Guild, member: discord.Member, action: str, count: int) -> None:
+        me = guild.me
+        if member.top_role >= me.top_role or member == guild.owner:
+            return
+        reason = f"Automatisch: {count} Verwarnungen"
+        try:
+            if action == "timeout" and me.guild_permissions.moderate_members:
+                await member.timeout(timedelta(hours=1), reason=reason)
+            elif action == "kick" and me.guild_permissions.kick_members:
+                await member.kick(reason=reason)
+            elif action == "ban" and me.guild_permissions.ban_members:
+                await member.ban(reason=reason, delete_message_seconds=0)
+            else:
+                return
+        except discord.HTTPException as ex:
+            log.warning("Automatische Strafe %s: %r", member.id, ex)
+            return
+        if action != "ban":  # Ban loggt sich selbst über on_member_ban
+            await self.log(guild, discord.Embed(
+                title=f"🚨 Automatisch: {action}", colour=discord.Colour.dark_red(),
+                description=f"{member.mention} ({member}) nach {count} Verwarnungen",
+            ))
+
+    @app_commands.command(name="warnungen", description="Verwarnungen eines Mitglieds anzeigen")
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.guild_only()
+    async def warnings_list(self, interaction: discord.Interaction, mitglied: discord.Member):
+        rows = await self.db.fetchall(
+            "SELECT id, moderator_id, reason, created FROM warnings WHERE guild_id=? AND user_id=? ORDER BY created DESC",
+            (interaction.guild_id, mitglied.id),
+        )
+        if not rows:
+            return await interaction.response.send_message(f"{mitglied.mention} hat keine Verwarnungen.", ephemeral=True)
+        lines = []
+        for r in rows:
+            mod = interaction.guild.get_member(r["moderator_id"])
+            when = discord.utils.format_dt(datetime.fromtimestamp(r["created"], tz=timezone.utc), "R")
+            lines.append(f"**#{r['id']}** {when} – {clip(r['reason'], 200)} "
+                        f"(von {mod.mention if mod else r['moderator_id']})")
+        e = discord.Embed(title=f"⚠️ {len(rows)} Verwarnung(en): {mitglied}", colour=discord.Colour.yellow(),
+                          description="\n".join(lines)[:4000])
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
+    @app_commands.command(name="warnung-loeschen", description="Einzelne Verwarnung per ID löschen (siehe /warnungen)")
+    @app_commands.default_permissions(moderate_members=True)
+    @app_commands.guild_only()
+    async def warn_delete(self, interaction: discord.Interaction, warnung_id: int):
+        row = await self.db.fetchone(
+            "SELECT id FROM warnings WHERE id=? AND guild_id=?", (warnung_id, interaction.guild_id)
+        )
+        if not row:
+            raise UserError(f"Keine Verwarnung mit der ID {warnung_id} gefunden.")
+        await self.db.execute("DELETE FROM warnings WHERE id=?", (warnung_id,))
+        await interaction.response.send_message(f"Verwarnung #{warnung_id} gelöscht.", ephemeral=True)
+
+    # ---- Kick/Ban ----
+
+    @app_commands.command(name="kick", description="Mitglied vom Server entfernen (kann wieder beitreten)")
+    @app_commands.describe(grund="Wird im Log vermerkt")
+    @app_commands.default_permissions(kick_members=True)
+    @app_commands.guild_only()
+    async def kick(self, interaction: discord.Interaction, mitglied: discord.Member, grund: str | None = None):
+        if mitglied.top_role >= interaction.guild.me.top_role or mitglied == interaction.guild.owner:
+            return await interaction.response.send_message("Dieses Mitglied kann ich nicht entfernen.", ephemeral=True)
+        try:
+            await mitglied.send(f"Du wurdest von **{interaction.guild.name}** entfernt."
+                                + (f"\nGrund: {grund}" if grund else ""))
+        except discord.HTTPException:
+            pass
+        await mitglied.kick(reason=f"{interaction.user}: {grund or 'ohne Grund'}")
+        await interaction.response.send_message(f"{mitglied.mention} wurde entfernt.", ephemeral=True)
+        await self.log(interaction.guild, discord.Embed(
+            title="👢 Kick", colour=discord.Colour.orange(),
+            description=f"{mitglied.mention} ({mitglied})\nVon {interaction.user.mention}"
+                        + (f"\nGrund: {grund}" if grund else ""),
+        ))
+
+    @app_commands.command(name="ban", description="Mitglied bannen")
+    @app_commands.describe(grund="Wird im Log vermerkt",
+                           nachrichten_tage="Nachrichten der letzten X Tage mitlöschen (0–7)")
+    @app_commands.default_permissions(ban_members=True)
+    @app_commands.guild_only()
+    async def ban(self, interaction: discord.Interaction, mitglied: discord.Member, grund: str | None = None,
+                  nachrichten_tage: app_commands.Range[int, 0, 7] = 0):
+        if mitglied.top_role >= interaction.guild.me.top_role or mitglied == interaction.guild.owner:
+            return await interaction.response.send_message("Dieses Mitglied kann ich nicht bannen.", ephemeral=True)
+        try:
+            await mitglied.send(f"Du wurdest von **{interaction.guild.name}** gebannt."
+                                + (f"\nGrund: {grund}" if grund else ""))
+        except discord.HTTPException:
+            pass
+        await mitglied.ban(reason=f"{interaction.user}: {grund or 'ohne Grund'}",
+                           delete_message_seconds=nachrichten_tage * 86400)
+        await interaction.response.send_message(f"{mitglied.mention} wurde gebannt.", ephemeral=True)
+
+    @app_commands.command(name="unban", description="Bann aufheben (User-ID, siehe /aufraeumen bericht oder Bann-Liste)")
+    @app_commands.default_permissions(ban_members=True)
+    @app_commands.guild_only()
+    async def unban(self, interaction: discord.Interaction, user_id: str, grund: str | None = None):
+        if not user_id.isdigit():
+            raise UserError("Das ist keine gültige User-ID.")
+        user = discord.Object(id=int(user_id))
+        try:
+            await interaction.guild.unban(user, reason=f"{interaction.user}: {grund or 'ohne Grund'}")
+        except discord.NotFound:
+            raise UserError("Dieser User ist nicht gebannt.")
+        await interaction.response.send_message(f"Bann für `{user_id}` aufgehoben.", ephemeral=True)
 
 
 async def setup(bot):

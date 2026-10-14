@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -425,6 +426,24 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         if einladungslinks_erlauben is not None:
             await self.db.set(interaction.guild_id, "allow_invites", einladungslinks_erlauben)
         await interaction.response.send_message(f"Spamschutz {'an' if aktiv else 'aus'}.", ephemeral=True)
+
+    @app_commands.command(name="verwarnungen", description="Automatische Strafe ab X Verwarnungen (0 = aus)")
+    @app_commands.describe(schwelle="Ab wie vielen Verwarnungen die Strafe greift (0 = abschalten)",
+                           aktion="Welche Strafe ab der Schwelle")
+    async def warn_settings(
+        self, interaction: discord.Interaction, schwelle: app_commands.Range[int, 0, 100] = 0,
+        aktion: Literal["timeout", "kick", "ban"] = "timeout",
+    ):
+        if schwelle == 0:
+            await self.db.set(interaction.guild_id, "warn_threshold", None)
+            await self.db.set(interaction.guild_id, "warn_action", None)
+            return await interaction.response.send_message("Automatische Strafe ist aus.", ephemeral=True)
+        await self.db.set(interaction.guild_id, "warn_threshold", schwelle)
+        await self.db.set(interaction.guild_id, "warn_action", aktion)
+        await interaction.response.send_message(
+            f"Ab {schwelle} Verwarnungen in Folge: automatisch {aktion}"
+            f"{' (1 Std.)' if aktion == 'timeout' else ''}.", ephemeral=True
+        )
 
     @app_commands.command(name="temp-voice", description="„Join to create“-Kanal anlegen oder festlegen")
     @app_commands.describe(kanal="Vorhandener Sprachkanal; leer lassen = neuen anlegen", aus="Funktion abschalten")

@@ -26,7 +26,8 @@ def test_all_commands_register():
     names = run(go())
     for expected in ["play", "radio", "skip", "stop", "warteschlange", "lautstaerke", "wiederholen",
                      "setup log-kanal", "setup temp-voice", "setup panel", "setup management-kanal",
-                     "setup verifizierung", "rollen-panel", "timeout",
+                     "setup verifizierung", "setup verwarnungen", "rollen-panel", "timeout",
+                     "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen

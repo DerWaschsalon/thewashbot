@@ -27,6 +27,10 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
   Vorschau/Bestätigung, bestehende Mitglieder werden automatisch mitgenommen, `aus:True` schaltet ab)
 - **Klick-Einstellungen**: `/setup panel` (ephemer) und `/setup management-kanal` (fester, dauerhaft
   klickbarer Kanal, überlebt Neustarts über `Setup.register_persistent_views`)
+- **Verwarnungen**: `/warn`, `/warnungen`, `/warnung-loeschen`, `/kick`, `/ban`, `/unban`,
+  `/setup verwarnungen` (automatische Strafe ab einstellbarer Schwelle: Timeout/Kick/Ban), DM an
+  Betroffene. `/clear` und `/slowmode` aus der Liste unten noch offen (deckt sich mit
+  `/aufraeumen nachrichten`, ggf. nicht mehr nötig).
 
 ## Noch zu bauen (Daves Auswahl)
 
@@ -47,8 +51,6 @@ Gewählt:
 Fehlende MEE6-Funktionen:
 - **Levelsystem**: 15–25 XP pro Nachricht, 60 s Abklingzeit, Formel 5·l² + 50·l + 100; Rangkarte
   (Pillow), `/rangliste`, Level-up-Nachricht, Rollen-Belohnungen, Kanäle/Rollen ohne XP, Admin-XP-Befehle
-- **Verwarnungen**: /warn, /warnungen, /warnung-loeschen, /kick, /ban, /unban, /clear, /slowmode;
-  automatische Strafen ab X Verwarnungen (Timeout/Kick/Ban, einstellbar), DM an Betroffene
 - **Automod erweitert**: Wortfilter, Großbuchstaben, Emoji-Spam, Link-Filter mit erlaubten Domains,
   Verstöße als automatische Verwarnung
 - **Eigene Befehle** (Präfix `!`, Platzhalter {user} {server})
