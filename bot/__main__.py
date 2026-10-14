@@ -23,6 +23,7 @@ COGS = [
     "bot.cogs.cleanup",
     "bot.cogs.reminders",
     "bot.cogs.dps",
+    "bot.cogs.notifications",
 ]
 
 

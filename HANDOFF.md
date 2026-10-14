@@ -37,6 +37,14 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
 - **DeckBar-Gruppen-DPS**: `/dps-webhook kanal:` richtet einen Token+Kanal ein, der Bot hört per
   aiohttp auf Port 8787 (`bot/cogs/dps.py`) auf `POST /dps/<token>` und postet ein Embed (ein Post
   pro Gruppe). Gegenstück fehlt noch in DeckBar selbst — siehe Übergabe weiter unten.
+- **Benachrichtigungen (GitHub)**: `bot/notify/base.py` (Provider-Schnittstelle),
+  `bot/notify/github.py` (Releases/Issues/PRs/Commits per Polling, Dedup über `feeds.state`,
+  Discussions bewusst nicht dabei — nur GraphQL), `bot/notify/manager.py` (Registry + Abfrage,
+  Fehler landen in `feeds.error`), `bot/cogs/notifications.py` (Klick-Assistent + Verwaltung +
+  Testbenachrichtigung, hängt als „🔔 Benachrichtigungen“-Button am Klick-Panel). `feeds`-Tabelle
+  in db.py um events/filters/enabled/state/error erweitert (mit Migration für schon bestehende
+  Installationen, siehe `Database._migrate`). Nächster Dienst (YouTube/Twitch/RSS/…) muss nur
+  `Provider` implementieren und sich in `PROVIDERS` eintragen — die Discord-Seite ändert sich nicht.
 
 ## Noch zu bauen (Daves Auswahl)
 
@@ -60,7 +68,8 @@ Fehlende MEE6-Funktionen:
   Verstöße als automatische Verwarnung
 - **Eigene Befehle** (Präfix `!`, Platzhalter {user} {server})
 - **Zeitgesteuerte Ankündigungen** (Intervall in Minuten)
-- **Benachrichtigungen**: YouTube per RSS (ohne Schlüssel), Twitch nur mit TWITCH_CLIENT_ID/SECRET
+- **Benachrichtigungen: weitere Dienste** (GitHub ist fertig, siehe oben): YouTube per RSS (ohne
+  Schlüssel), Twitch nur mit TWITCH_CLIENT_ID/SECRET — jeweils als neuer `Provider` in `bot/notify/`
 - **Statistik-Kanäle** (Mitglieder, Bots; Umbenennen höchstens alle 10 Min.)
 - **Umfragen** (native Discord-Polls), **Giveaways** (Button, Reroll), **Geburtstage** (tägl. 9 Uhr
   Europe/Berlin), **Embed-Ersteller** (Modal)

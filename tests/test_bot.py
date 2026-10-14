@@ -22,14 +22,18 @@ def test_all_commands_register():
             bot = Bot(Database(Path(d) / "t.sqlite3"), sync=False)
             await bot.setup_hook()
             names = sorted(c.qualified_name for c in bot.tree.walk_commands())
-            # Reminders.check_due scheitert hier erwartbar an wait_until_ready() (kein echtes
-            # Login in diesem Test) — Task sauber abwarten statt "exception was never retrieved".
-            task = bot.get_cog("Reminders").check_due.get_task()
-            bot.get_cog("Reminders").check_due.cancel()
-            if task:
-                with contextlib.suppress(Exception):
-                    await task
+            # Reminders.check_due und Notifications.poll_feeds scheitern hier erwartbar an
+            # wait_until_ready() (kein echtes Login in diesem Test) — Tasks sauber abwarten statt
+            # "exception was never retrieved".
+            for cog_name, loop_name in [("Reminders", "check_due"), ("Notifications", "poll_feeds")]:
+                loop = getattr(bot.get_cog(cog_name), loop_name)
+                task = loop.get_task()
+                loop.cancel()
+                if task:
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await task
             await bot.get_cog("DpsWebhook").runner.cleanup()
+            await bot.get_cog("Notifications").manager.close()
             await bot.db.close()
             await bot.get_cog("Music").session.close()
             return names
@@ -111,11 +115,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 7  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 8  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 8  # inkl. Schließen
+    assert len(ephemeral.children) == 9  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -139,6 +143,106 @@ def test_reminder_parsing():
 
     with pytest.raises(Exception):
         parse_when("irgendwann", now)
+
+
+def test_feeds_migration_on_existing_db():
+    """Simuliert eine schon laufende Installation: feeds-Tabelle existiert noch ohne die neuen
+    Spalten (events/filters/enabled/state/error) — Database.connect() muss sie nachrüsten,
+    ohne bestehende Zeilen zu verlieren."""
+    import aiosqlite
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "t.sqlite3"
+            conn = await aiosqlite.connect(path)
+            await conn.execute(
+                "CREATE TABLE feeds (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, "
+                "channel_id INTEGER NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, "
+                "message TEXT NOT NULL DEFAULT '', last_id TEXT)"
+            )
+            await conn.execute(
+                "INSERT INTO feeds (guild_id, channel_id, kind, source) VALUES (1, 2, 'github', 'o/r')"
+            )
+            await conn.commit()
+            await conn.close()
+
+            db = Database(path)
+            await db.connect()
+            row = await db.fetchone("SELECT * FROM feeds WHERE source='o/r'")
+            await db.close()
+            return row
+
+    row = run(go())
+    assert row["guild_id"] == 1 and row["source"] == "o/r"
+    assert row["events"] == "[]" and row["filters"] == "{}" and row["enabled"] == 1 and row["state"] == "{}"
+
+
+def test_github_provider_dedup_and_transitions():
+    from bot.notify.github import GitHubProvider
+
+    provider = GitHubProvider()
+    responses: dict[str, tuple[int, object]] = {}
+
+    async def fake_get(path, **params):
+        return responses[path.split("/")[-1]]
+
+    provider._get = fake_get  # keine echten HTTP-Aufrufe in Tests
+
+    async def go():
+        events = ["release", "issue_open", "issue_closed", "pr_open", "pr_closed", "pr_merged"]
+        responses["releases"] = (200, [{"id": 1, "name": "v1", "prerelease": False, "draft": False}])
+        responses["issues"] = (200, [{"number": 10, "state": "open", "title": "Bug", "labels": [],
+                                      "user": {"login": "x"}}])
+        responses["pulls"] = (200, [{"number": 20, "state": "open", "merged_at": None, "title": "PR",
+                                     "labels": [], "user": {"login": "x"}}])
+
+        # Erster Abruf (baseline): nichts melden, nur Zustand füllen
+        notes, state = await provider.poll("o/r", events, {}, {}, baseline=True)
+        assert notes == []
+        assert state["releases"] == [1] and state["issues"]["10"] == "open"
+
+        # Gleicher Stand, kein baseline mehr: immer noch nichts Neues
+        notes, state2 = await provider.poll("o/r", events, {}, state, baseline=False)
+        assert notes == []
+
+        # Neuer Release + Issue geschlossen + PR gemerged
+        responses["releases"] = (200, [
+            {"id": 2, "name": "v2", "prerelease": False, "draft": False},
+            {"id": 1, "name": "v1", "prerelease": False, "draft": False},
+        ])
+        responses["issues"] = (200, [{"number": 10, "state": "closed", "title": "Bug", "labels": [],
+                                      "user": {"login": "x"}}])
+        responses["pulls"] = (200, [{"number": 20, "state": "closed", "merged_at": "2026-01-01T00:00:00Z",
+                                     "title": "PR", "labels": [], "user": {"login": "x"}}])
+        notes, state3 = await provider.poll("o/r", events, {}, state2, baseline=False)
+        kinds = sorted(n.event for n in notes)
+        assert kinds == ["issue_closed", "pr_merged", "release"]
+        assert state3["releases"] == [1, 2]
+        assert state3["issues"]["10"] == "closed"
+        assert state3["prs"]["20"] == "merged"
+
+    run(go())
+
+
+def test_github_provider_filters_and_baseline_skip():
+    from bot.notify.github import GitHubProvider
+
+    provider = GitHubProvider()
+    data = [{"id": 1, "name": "v1", "prerelease": True, "draft": False}]
+
+    async def fake_get(path, **params):
+        return 200, data
+
+    provider._get = fake_get
+
+    async def go():
+        # Baseline registriert die ID, meldet aber nichts
+        _, state = await provider.poll("o/r", ["release"], {"prereleases": False}, {}, baseline=True)
+        data.append({"id": 2, "name": "v2", "prerelease": True, "draft": False})
+        notes, _ = await provider.poll("o/r", ["release"], {"prereleases": False}, state, baseline=False)
+        assert notes == []  # Pre-Release durch Filter ausgeschlossen
+
+    run(go())
 
 
 def test_dps_embed():

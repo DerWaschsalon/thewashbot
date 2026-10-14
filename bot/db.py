@@ -66,7 +66,11 @@ CREATE TABLE IF NOT EXISTS scheduled (
 );
 CREATE TABLE IF NOT EXISTS feeds (
     id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL,
-    kind TEXT NOT NULL, source TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', last_id TEXT
+    kind TEXT NOT NULL, source TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', last_id TEXT,
+    -- events/filters: JSON, state: JSON (zuletzt gesehene IDs je Ereignistyp, für Duplikat-Schutz)
+    events TEXT NOT NULL DEFAULT '[]', filters TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL DEFAULT '{}',
+    error TEXT
 );
 CREATE TABLE IF NOT EXISTS level_rewards (
     id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, level INTEGER NOT NULL,
@@ -87,10 +91,27 @@ class Database:
         self.conn.row_factory = aiosqlite.Row
         await self.conn.execute("PRAGMA journal_mode=WAL")
         await self.conn.executescript(SCHEMA)
+        await self._migrate()
         await self.conn.commit()
         async with self.conn.execute("SELECT guild_id, key, value FROM settings") as cur:
             async for guild_id, key, value in cur:
                 self._settings.setdefault(guild_id, {})[key] = value
+
+    async def _migrate(self) -> None:
+        """Spalten, die nach dem ersten `CREATE TABLE IF NOT EXISTS` dazukamen (SQLite legt sie
+        bei einer bereits vorhandenen Tabelle nicht automatisch an)."""
+        assert self.conn
+        async with self.conn.execute("PRAGMA table_info(feeds)") as cur:
+            existing = {row[1] async for row in cur}
+        for name, ddl in [
+            ("events", "ALTER TABLE feeds ADD COLUMN events TEXT NOT NULL DEFAULT '[]'"),
+            ("filters", "ALTER TABLE feeds ADD COLUMN filters TEXT NOT NULL DEFAULT '{}'"),
+            ("enabled", "ALTER TABLE feeds ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"),
+            ("state", "ALTER TABLE feeds ADD COLUMN state TEXT NOT NULL DEFAULT '{}'"),
+            ("error", "ALTER TABLE feeds ADD COLUMN error TEXT"),
+        ]:
+            if name not in existing:
+                await self.conn.execute(ddl)
 
     async def close(self) -> None:
         if self.conn:

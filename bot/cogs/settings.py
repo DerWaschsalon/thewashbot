@@ -322,6 +322,16 @@ class SettingsPanel(discord.ui.View):
     async def dps_webhook(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=DpsWebhookView(self))
 
+    @discord.ui.button(label="Benachrichtigungen", emoji="🔔", style=discord.ButtonStyle.secondary, row=2,
+                       custom_id="setup:open:notifications")
+    async def notifications(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        from .notifications import NotificationsHomeView, home_embed
+
+        notif_cog = self.cog.bot.get_cog("Notifications")
+        await interaction.response.edit_message(
+            embed=home_embed(), view=NotificationsHomeView(notif_cog, self.guild, self.persistent)
+        )
+
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
 

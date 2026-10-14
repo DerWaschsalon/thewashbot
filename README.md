@@ -18,6 +18,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Aufräumen** | `/aufraeumen nachrichten`, `/aufraeumen bots`, `/aufraeumen bericht` | Alte Nachrichten löschen (Filter nach Alter, Person, nur Bots), alte Bots entfernen, Bericht über tote Kanäle und leere Rollen. Immer erst mit Vorschau und Bestätigung. |
 | **Erinnerungen** | `/erinnere wann: text: privat:` | Zeit relativ (`2h`, `30m`, `1d2h`) oder absolut (`18:30`, `24.12. 18:00`). `/erinnerungen` zeigt eigene offene Erinnerungen, `/erinnerung-loeschen` entfernt eine. |
 | **DeckBar-Gruppen-DPS** | `/setup dps-webhook`, auch im Klick-Panel | Nimmt den Gruppen-Endstand von [DeckBar](https://github.com/gamunex/deckbar) nach jedem Kampf entgegen und postet ihn als Embed (eine Nachricht pro Gruppe, nicht pro Spieler). Braucht Port 8787 in `docker-compose.yml` und `DPS_WEBHOOK_HOST` in `.env`. |
+| **Benachrichtigungen** | Button „🔔 Benachrichtigungen" im Klick-Panel | GitHub-Repos beobachten (Releases, Issues, Pull Requests, Commits) per Klick-Assistent, komplett über Buttons/Select-Menüs/Modals, kein Befehl nötig. Modular für weitere Dienste (YouTube, Twitch, RSS, …) — siehe `bot/notify/`. |
 | **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
@@ -106,6 +107,30 @@ yt-dlp, weil YouTube regelmäßig etwas ändert. Spielt YouTube nicht mehr: Cont
   Ohne API-Schlüssel liest er die öffentliche Einbettungsseite (bis ~100 Titel). Von Spotify selbst
   erstellte Playlists (z. B. „Today's Top Hits“) gibt die API seit Ende 2024 nicht mehr heraus.
 - **Spamschutz** ignoriert Bots und alle mit „Nachrichten verwalten“.
+
+## Benachrichtigungen (GitHub) einrichten
+
+Im Klick-Panel (`/setup panel` oder `/setup management-kanal`) → Button **🔔 Benachrichtigungen**
+→ **➕ Neue Benachrichtigung**: Dienst (aktuell nur GitHub) → Repository (wird geprüft) →
+Ereignisse (Mehrfachauswahl: Releases, neue/geschlossene Issues, neue/geschlossene/gemergte Pull
+Requests, Commits) → Ziel-Kanal → optionale Filter (Labels, Autor, Pre-Releases/Drafts) →
+Zusammenfassung mit Speichern/Abbrechen. Danach sofort ein stiller erster Abgleich (postet nichts,
+verhindert, dass alte Releases/Issues/PRs beim Einrichten als „neu" durchgehen).
+
+Unter **⚙️ Benachrichtigungen verwalten**: pro Eintrag Bearbeiten (Ereignisse/Kanal), De-/Aktivieren,
+Löschen, **🧪 Testbenachrichtigung** (schickt eine echte Beispiel-Meldung in den Zielkanal — prüft
+damit auch, ob der Bot dort wirklich schreiben darf). **🔄 Aktualisieren** fragt sofort ab, statt
+auf den nächsten Durchlauf zu warten (`NOTIFY_POLL_MINUTES`, Standard 10).
+
+Discussions sind bewusst nicht dabei (nur über GitHub GraphQL abrufbar, nicht über die hier
+genutzte REST-API). Ohne `GITHUB_TOKEN` in der `.env` erlaubt GitHub nur 60 Anfragen/Stunde
+**insgesamt** — reicht nur für wenige Repos bei 10-Minuten-Takt. Mit einem Token (nur Lesen nötig,
+github.com/settings/tokens) sind es 5000/Stunde.
+
+Architektur für weitere Dienste: `bot/notify/base.py` (Schnittstelle `Provider`), `bot/notify/github.py`
+(erster Provider), `bot/notify/manager.py` (Registry + Abfrage/Dedup/Fehlerbehandlung). Ein neuer
+Dienst (YouTube, Twitch, RSS, …) implementiert nur `Provider` und trägt sich in `PROVIDERS` ein —
+die Discord-Oberfläche in `bot/cogs/notifications.py` kennt nichts Dienst-Spezifisches.
 
 ## DeckBar-Gruppen-DPS einrichten
 
