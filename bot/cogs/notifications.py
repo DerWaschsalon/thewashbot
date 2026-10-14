@@ -185,8 +185,10 @@ class NotifChannelSelect(discord.ui.ChannelSelect):
         self.draft = draft
 
     async def callback(self, interaction: discord.Interaction):
-        channel = self.values[0]
-        if not channel.permissions_for(interaction.guild.me).send_messages:
+        # ChannelSelect liefert ein "leichtes" AppCommandChannel ohne permissions_for() —
+        # den echten, gecachten Kanal fürs Rechte-Prüfen holen.
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        if hasattr(channel, "permissions_for") and not channel.permissions_for(interaction.guild.me).send_messages:
             return await interaction.response.send_message(
                 f"Ich darf in {channel.mention} nicht schreiben. Bitte einen anderen Kanal wählen "
                 "oder mir dort Schreibrechte geben.", ephemeral=True,

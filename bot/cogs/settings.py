@@ -70,8 +70,10 @@ class LogChannelSelect(discord.ui.ChannelSelect):
         self.panel = panel
 
     async def callback(self, interaction: discord.Interaction):
-        channel = self.values[0]
-        if not channel.permissions_for(interaction.guild.me).send_messages:
+        # ChannelSelect liefert ein "leichtes" AppCommandChannel ohne permissions_for() —
+        # den echten, gecachten Kanal fürs Rechte-Prüfen holen.
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        if hasattr(channel, "permissions_for") and not channel.permissions_for(interaction.guild.me).send_messages:
             return await interaction.response.send_message(f"Ich darf in {channel.mention} nicht schreiben.", ephemeral=True)
         await self.panel.cog.db.set(interaction.guild_id, "log_channel", channel.id)
         await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
