@@ -1,0 +1,113 @@
+# Discord-Bot: Musik, Rollen, Moderation, Temp-Voice, Aufräumen
+
+Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Slash-Befehle
+(`/…`). Antworten, die nur dich betreffen, sieht auch nur du, damit die Kanäle sauber bleiben.
+
+## Funktionen
+
+| Bereich | Befehle | Was passiert |
+|---|---|---|
+| **Musik** | `/play`, `/skip`, `/stop`, `/pause`, `/weiter`, `/warteschlange`, `/jetzt`, `/lautstaerke`, `/wiederholen`, `/mischen`, `/entfernen` | YouTube-Links und -Suche, SoundCloud, Spotify-Links (Titel, Alben, Playlists, gesucht auf YouTube). Eine „Läuft gerade“-Nachricht mit Buttons, die alte wird gelöscht. Allein im Kanal geht der Bot nach 1 Min., bei leerer Warteschlange nach 5 Min. |
+| **Radio** | `/radio sender:` oder `/radio url:` | Zehntausende Sender aus radio-browser.info, Vorschläge beim Tippen. Oder direkt eine Stream-Adresse. |
+| **Rollen** | `/rollen-panel` | Nachricht mit Buttons, über die man sich Rollen selbst nimmt oder abgibt. Funktioniert auch nach Neustarts. |
+| **Willkommen** | `/setup willkommen`, `/setup autorolle` | Begrüßung mit Platzhaltern `{user}`, `{name}`, `{server}`, `{anzahl}`, Rolle für Neue |
+| **Verifizierung** | `/setup verifizierung` | Panel mit Regeln + „Regeln akzeptiert“-Button. Aktiv: @everyone sieht den Server erst nach Bestätigen, nur der Regel-Kanal bleibt sichtbar. Autorolle kommt dann erst nach dem Klick. Mit Vorschau/Bestätigung, `aus:True` schaltet wieder ab. |
+| **Moderation** | `/setup log-kanal`, `/setup spamschutz`, `/timeout` | Log für gelöschte/bearbeitete Nachrichten, Beitritte (mit Warnung bei neuen Konten), Austritte, Banns, Rollen. Spamschutz: Flut, Massen-Erwähnungen, Einladungslinks. |
+| **Temp-Voice** | `/setup temp-voice`, `/vc name/limit/sperren/freigeben/einladen/uebernehmen` | Wer „➕ Kanal erstellen“ betritt, bekommt einen eigenen Sprachkanal, der leer wieder verschwindet. |
+| **Aufräumen** | `/aufraeumen nachrichten`, `/aufraeumen bots`, `/aufraeumen bericht` | Alte Nachrichten löschen (Filter nach Alter, Person, nur Bots), alte Bots entfernen, Bericht über tote Kanäle und leere Rollen. Immer erst mit Vorschau und Bestätigung. |
+| **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
+
+`/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
+Auswahl per Dropdown, Text per Formular, Ein/Aus per Knopf — kein Befehl tippen nötig).
+`/setup management-kanal kategorie:` legt einen festen Kanal mit genau diesem Klick-Panel an (z. B.
+unter einer internen Admin-Kategorie) — bleibt dauerhaft da und funktioniert auch nach einem
+Neustart des Bots weiter. Die `/setup`- und `/aufraeumen`-Befehle sehen nur Leute mit
+„Server verwalten“.
+
+## 1. Bot bei Discord anlegen
+
+1. <https://discord.com/developers/applications> → **New Application**, Name z. B. eures Servers
+2. Links **Bot** → **Reset Token** → Token kopieren (kommt in `.env`, niemals teilen)
+3. Auf derselben Seite unter **Privileged Gateway Intents** einschalten:
+   **Server Members Intent** und **Message Content Intent**
+4. Bot einladen mit diesem Link (Client-ID von der Seite **OAuth2** einsetzen):
+
+   ```
+   https://discord.com/oauth2/authorize?client_id=DEINE_CLIENT_ID&scope=bot+applications.commands&permissions=1099800374290
+   ```
+
+   Die Rechte: Kanäle sehen, Nachrichten senden/verwalten/Verlauf lesen, Links einbetten, Dateien,
+   externe Emojis, Sprache verbinden/sprechen/verschieben, Kanäle und Rollen verwalten, kicken,
+   Timeout.
+5. Nach dem Einladen in den **Servereinstellungen → Rollen** die Rolle des Bots **über** die Rollen
+   ziehen, die er vergeben soll (Autorolle, Rollen-Panel) und über die Bots, die er entfernen soll.
+
+## 2. Auf dem Home-Server starten (Docker)
+
+Das Image wird von GitHub Actions gebaut und nach `ghcr.io/navonex/thewashbot` gepusht (bei jedem
+Push auf `main`, der diesen Ordner betrifft). `docker-compose.yml` zieht dieses fertige Image,
+kein Bauen mehr auf dem Server nötig.
+
+```sh
+cp .env.example .env        # DISCORD_TOKEN und DEV_GUILD_ID eintragen
+docker compose pull
+docker compose up -d
+docker compose logs -f      # "Angemeldet als …" und "… Slash-Befehle registriert"
+```
+
+Ist das GHCR-Paket `thewashbot` **privat** (Standard bei privaten Repos), braucht `docker compose
+pull` vorher einen Login mit einem GitHub-PAT (Scope `read:packages`):
+
+```sh
+echo "<PAT>" | docker login ghcr.io -u navonex --password-stdin
+```
+
+Alternative: Paket-Sichtbarkeit auf GitHub (Package-Einstellungen → Change visibility → Public)
+umstellen, dann entfällt der Login.
+
+**Unraid:** Ordner z. B. nach `/mnt/user/appdata/discord-bot` kopieren und dort im Terminal die
+Befehle oben ausführen (Plugin „Docker Compose Manager“), oder das Image bauen und als Container
+mit `/data` → `/mnt/user/appdata/discord-bot/data` und den Variablen aus `.env` anlegen.
+
+Die Einstellungen liegen in `data/bot.sqlite3`. Bei jedem Start aktualisiert der Container
+yt-dlp, weil YouTube regelmäßig etwas ändert. Spielt YouTube nicht mehr: Container neu starten.
+
+## 3. Einrichten (in Discord)
+
+```
+/setup log-kanal kanal:#mod-log
+/setup willkommen kanal:#willkommen text:Hey {user}, willkommen auf {server}! Schau in #regeln vorbei.
+/setup autorolle rolle:@Mitglied
+/setup temp-voice                       (legt Kategorie + „➕ Kanal erstellen“ an)
+/rollen-panel rollen:🎮 @Gamer 🎵 @Musik 📢 @News titel:Wähl deine Rollen
+```
+
+## Aufräumen: so gehen wir vor
+
+1. `/aufraeumen bericht` → du bekommst eine `.md`-Datei mit allen Kanälen (letzte Aktivität),
+   Rollen (wie viele Mitglieder) und Bots. Die kannst du mir schicken, dann machen wir gemeinsam
+   einen Plan, was weg kann.
+2. `/aufraeumen bots` → Liste aller Bots, Auswahl der alten, Bestätigen. 🔒 heißt: Der Bot steht
+   über meiner Rolle, also erst die Rolle verschieben.
+3. `/aufraeumen nachrichten kanal:#musik nur_bots:True` → z. B. alle alten Ausgaben der früheren
+   Musikbots weg. Mit `aelter_als_tage:` bleibt Neues stehen, angepinnte Nachrichten bleiben
+   standardmäßig. Nachrichten älter als 14 Tage löscht Discord nur einzeln, das dauert länger.
+
+## Gut zu wissen
+
+- **YouTube:** Das Abspielen von YouTube über Bots verstößt gegen die YouTube-AGB, deshalb wurden
+  große Bots wie Rythm abgeschaltet. Für einen privaten Server ist das Risiko gering, aber es kann
+  sein, dass YouTube die IP zeitweise blockiert („Sign in to confirm you're not a bot“). Dann hilft
+  eine Cookies-Datei (`YTDLP_COOKIES`, siehe yt-dlp-Doku), am besten von einem Zweitkonto.
+- **Spotify** liefert kein Audio. Der Bot liest Titel und Interpret und sucht sie auf YouTube.
+  Ohne API-Schlüssel liest er die öffentliche Einbettungsseite (bis ~100 Titel). Von Spotify selbst
+  erstellte Playlists (z. B. „Today's Top Hits“) gibt die API seit Ende 2024 nicht mehr heraus.
+- **Spamschutz** ignoriert Bots und alle mit „Nachrichten verwalten“.
+
+## Entwickeln und testen
+
+```sh
+pip install -r requirements.txt pytest
+python -m pytest -q tests          # ohne Discord-Verbindung
+DISCORD_TOKEN=… DB_PATH=./data/bot.sqlite3 python -m bot
+```
