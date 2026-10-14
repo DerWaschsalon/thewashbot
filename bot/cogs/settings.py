@@ -178,11 +178,13 @@ class DjRoleView(discord.ui.View):
 
 class TicketTeamRoleSelect(discord.ui.RoleSelect):
     def __init__(self, panel: "SettingsPanel"):
-        super().__init__(placeholder="Team-Rolle für Tickets wählen …", row=0, custom_id="setup:select:ticket_team_role")
+        super().__init__(placeholder="Team-Rolle(n) für Tickets wählen … (ersetzt die bisherige Auswahl)",
+                         min_values=1, max_values=10, row=0, custom_id="setup:select:ticket_team_role")
         self.panel = panel
 
     async def callback(self, interaction: discord.Interaction):
-        await self.panel.cog.db.set(interaction.guild_id, "ticket_team_role", self.values[0].id)
+        ids = ",".join(str(r.id) for r in self.values)
+        await self.panel.cog.db.set(interaction.guild_id, "ticket_team_roles", ids)
         await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
 
 
@@ -190,7 +192,7 @@ class TicketTeamRoleView(discord.ui.View):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(timeout=None if panel.persistent else 180)
         self.add_item(TicketTeamRoleSelect(panel))
-        self.add_item(ClearButton("Team-Rolle aus", "ticket_team_role", panel))
+        self.add_item(ClearButton("Team-Rollen aus", "ticket_team_roles", panel))
         self.add_item(BackButton(panel))
 
 
@@ -389,7 +391,8 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="Spamschutz", value="an" if db.get_bool(guild.id, "antispam", True) else "aus")
         e.add_field(name="Einladungslinks", value="erlaubt" if db.get_bool(guild.id, "allow_invites") else "werden gelöscht")
         e.add_field(name="DPS-Webhook (DeckBar)", value=fmt_channel(guild, db.get_int(guild.id, "dps_webhook_channel")))
-        e.add_field(name="Ticket-Team-Rolle", value=fmt_role(guild, db.get_int(guild.id, "ticket_team_role")))
+        ticket_roles = [fmt_role(guild, i) for i in db.get_ids(guild.id, "ticket_team_roles")]
+        e.add_field(name="Ticket-Team-Rollen", value=", ".join(ticket_roles) if ticket_roles else "–")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -512,13 +515,22 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
             f"{' (1 Std.)' if aktion == 'timeout' else ''}.", ephemeral=True
         )
 
-    @app_commands.command(name="tickets", description="Team-Rolle für Tickets festlegen (sieht neue Tickets, darf schließen)")
-    @app_commands.describe(rolle="Rolle, die zu jedem neuen Ticket-Thread hinzugefügt wird")
-    async def tickets_settings(self, interaction: discord.Interaction, rolle: discord.Role | None = None):
-        await self.db.set(interaction.guild_id, "ticket_team_role", rolle and rolle.id)
+    @app_commands.command(name="tickets", description="Team-Rolle(n) für Tickets hinzufügen/entfernen (mehrere möglich)")
+    @app_commands.describe(
+        rolle="Rolle, die hinzugefügt wird (oder entfernt, mit entfernen:True) — leer lässt alles wie es ist",
+        entfernen="Statt hinzuzufügen die Rolle aus der Liste entfernen",
+    )
+    async def tickets_settings(
+        self, interaction: discord.Interaction, rolle: discord.Role | None = None, entfernen: bool = False
+    ):
+        ids = self.db.get_ids(interaction.guild_id, "ticket_team_roles")
+        if rolle:
+            ids = [i for i in ids if i != rolle.id] if entfernen else list(dict.fromkeys(ids + [rolle.id]))
+            await self.db.set(interaction.guild_id, "ticket_team_roles", ",".join(map(str, ids)) or None)
+        roles = [r for i in ids if (r := interaction.guild.get_role(i))]
         await interaction.response.send_message(
-            f"Team-Rolle für Tickets: {rolle.mention}. Panel mit `/ticket-panel` posten."
-            if rolle else "Team-Rolle entfernt.", ephemeral=True
+            f"Team-Rollen für Tickets: {', '.join(r.mention for r in roles) if roles else 'keine'}. "
+            "Panel mit `/ticket-panel` posten.", ephemeral=True,
         )
 
     @app_commands.command(name="temp-voice", description="„Join to create“-Kanal anlegen oder festlegen")
@@ -587,8 +599,8 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
                    f"• {regel_kanal.mention} bleibt für alle sichtbar\n"
                    f"• Die Verifiziert-Rolle bekommt „Kanäle ansehen“ automatisch zurück\n"
                    f"• {affected} bestehende Mitglieder bekommen die Rolle sofort, damit niemand ausgesperrt wird\n"
-                   f"• Neue Mitglieder bekommen die Autorolle (falls gesetzt) erst nach Klick auf "
-                   "„Regeln akzeptiert“"),
+                   f"• Die Autorolle (falls gesetzt, z. B. „Neuling“) bekommen neue Mitglieder weiterhin sofort "
+                   "beim Beitritt, unabhängig von der Verifizierung"),
             inline=False,
         )
         view = Confirm(interaction.user.id, "Einrichten")
@@ -625,10 +637,28 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
             title="📜 Regeln", description=(text or DEFAULT_VERIFY_TEXT).replace("\\n", "\n"),
             colour=discord.Colour.blurple(),
         )
-        await regel_kanal.send(embed=panel_embed, view=VerifyPanelView())
+        panel_message = await regel_kanal.send(embed=panel_embed, view=VerifyPanelView())
+        await self.db.set(guild.id, "verify_message", panel_message.id)
         await interaction.edit_original_response(
             content=f"✅ Verifizierung eingerichtet. Panel steht in {regel_kanal.mention}.", embed=None, view=None
         )
+
+    @app_commands.command(name="regeln-text", description="Text im Regeln-Panel ändern (Verifizierung muss schon eingerichtet sein)")
+    @app_commands.describe(text="Neuer Text im Regeln-Panel")
+    async def rules_text(self, interaction: discord.Interaction, text: str):
+        channel_id = self.db.get_int(interaction.guild_id, "verify_channel")
+        message_id = self.db.get_int(interaction.guild_id, "verify_message")
+        channel = interaction.guild.get_channel(channel_id) if channel_id else None
+        if not channel or not message_id:
+            raise UserError("Noch keine Verifizierung eingerichtet: `/setup verifizierung`.")
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            raise UserError("Das Regeln-Panel wurde gelöscht. Einmal neu einrichten: `/setup verifizierung`.")
+        embed = message.embeds[0] if message.embeds else discord.Embed(title="📜 Regeln", colour=discord.Colour.blurple())
+        embed.description = text.replace("\\n", "\n")
+        await message.edit(embed=embed)
+        await interaction.response.send_message(f"Regeln-Text in {channel.mention} aktualisiert.", ephemeral=True)
 
     @app_commands.command(name="dps-webhook", description="Kanal für DeckBar-Gruppen-DPS festlegen")
     @app_commands.describe(kanal="Kanal, in den die Gruppen-DPS nach jedem Kampf gepostet wird")

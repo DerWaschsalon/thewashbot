@@ -48,9 +48,10 @@ class Roles(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         guild = member.guild
+        # Autorolle gibt's sofort beim Beitritt (z. B. "Neuling"), unabhängig von der
+        # Verifizierung — die vergibt bei Bestätigung ihre eigene Rolle (verify_role).
         role_id = self.db.get_int(guild.id, "autorole")
-        verifying = self.db.get_bool(guild.id, "verify_active") and self.db.get_int(guild.id, "verify_role")
-        if role_id and not member.bot and not verifying:
+        if role_id and not member.bot:
             role = guild.get_role(role_id)
             if role and role_ok(guild, role):
                 try:

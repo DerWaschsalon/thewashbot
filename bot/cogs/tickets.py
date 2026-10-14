@@ -29,9 +29,8 @@ KINDS = {
 }
 
 
-def team_role(db, guild: discord.Guild) -> discord.Role | None:
-    role_id = db.get_int(guild.id, "ticket_team_role")
-    return guild.get_role(role_id) if role_id else None
+def team_roles(db, guild: discord.Guild) -> list[discord.Role]:
+    return [r for rid in db.get_ids(guild.id, "ticket_team_roles") if (r := guild.get_role(rid))]
 
 
 class TicketPanelView(discord.ui.View):
@@ -72,8 +71,8 @@ class Tickets(commands.Cog):
     async def create_ticket(self, interaction: discord.Interaction, kind: str, text: str) -> None:
         guild = interaction.guild
         channel = interaction.channel
-        role = team_role(self.db, guild)
-        if role is None:
+        roles = team_roles(self.db, guild)
+        if not roles:
             return await interaction.response.send_message(
                 "Noch keine Team-Rolle für Tickets eingerichtet (`/setup tickets`).", ephemeral=True
             )
@@ -89,11 +88,16 @@ class Tickets(commands.Cog):
             reason=f"Ticket von {interaction.user}",
         )
         await thread.add_user(interaction.user)
-        for member in role.members:
-            try:
-                await thread.add_user(member)
-            except discord.HTTPException as e:
-                log.warning("Ticket %s: Team-Mitglied %s nicht hinzugefügt: %r", thread.id, member.id, e)
+        seen_members: set[int] = set()
+        for role in roles:
+            for member in role.members:
+                if member.id in seen_members:
+                    continue
+                seen_members.add(member.id)
+                try:
+                    await thread.add_user(member)
+                except discord.HTTPException as e:
+                    log.warning("Ticket %s: Team-Mitglied %s nicht hinzugefügt: %r", thread.id, member.id, e)
 
         await self.db.execute(
             "INSERT INTO tickets (channel_id, guild_id, user_id, kind, created) VALUES (?, ?, ?, ?, ?)",
@@ -102,7 +106,11 @@ class Tickets(commands.Cog):
 
         e = discord.Embed(title=f"{emoji} {label}", colour=discord.Colour.blurple(), description=text)
         e.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        await thread.send(content=f"{interaction.user.mention} {role.mention}", embed=e, view=TicketCloseView())
+        pings = " ".join(r.mention for r in roles)
+        await thread.send(
+            content=f"{interaction.user.mention} {pings}", embed=e, view=TicketCloseView(),
+            allowed_mentions=discord.AllowedMentions(users=True, roles=True),
+        )
         await interaction.followup.send(f"Ticket erstellt: {thread.mention}", ephemeral=True)
 
     async def close_ticket(self, interaction: discord.Interaction) -> None:
@@ -111,8 +119,8 @@ class Tickets(commands.Cog):
         row = await self.db.fetchone("SELECT * FROM tickets WHERE channel_id=?", (thread.id,))
         if not row:
             return await interaction.response.send_message("Das ist kein Ticket (mehr).", ephemeral=True)
-        role = team_role(self.db, guild)
-        is_team = role and isinstance(interaction.user, discord.Member) and role in interaction.user.roles
+        roles = team_roles(self.db, guild)
+        is_team = isinstance(interaction.user, discord.Member) and any(r in interaction.user.roles for r in roles)
         if not (is_team or interaction.user.id == row["user_id"] or interaction.user.guild_permissions.manage_guild):
             return await interaction.response.send_message(
                 "Nur das Team oder du selbst können dieses Ticket schließen.", ephemeral=True
@@ -165,7 +173,7 @@ class Tickets(commands.Cog):
         self, interaction: discord.Interaction, titel: str = "Support",
         text: str = "Klick auf einen Button, um ein Ticket zu eröffnen.",
     ):
-        if team_role(self.db, interaction.guild) is None:
+        if not team_roles(self.db, interaction.guild):
             raise UserError("Erst eine Team-Rolle einrichten: `/setup tickets rolle:`.")
         e = discord.Embed(title=titel, description=text.replace("\\n", "\n"), colour=discord.Colour.blurple())
         e.add_field(name="Optionen", value="\n".join(f"{emoji} {label}" for emoji, label, _ in KINDS.values()))

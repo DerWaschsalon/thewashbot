@@ -40,7 +40,7 @@ def test_all_commands_register():
     names = run(go())
     for expected in ["play", "radio", "skip", "stop", "warteschlange", "lautstaerke", "wiederholen",
                      "setup log-kanal", "setup temp-voice", "setup panel", "setup management-kanal",
-                     "setup verifizierung", "setup verwarnungen", "rollen-panel", "timeout",
+                     "setup verifizierung", "setup regeln-text", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
                      "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook",
                      "setup tickets", "ticket-panel",
