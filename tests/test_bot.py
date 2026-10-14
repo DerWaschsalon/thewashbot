@@ -1,5 +1,6 @@
 """Offline-Tests: Befehle laden, Datenbank, Warteschlangen-Logik, Quellen-Erkennung."""
 import asyncio
+import contextlib
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,7 +22,14 @@ def test_all_commands_register():
             bot = Bot(Database(Path(d) / "t.sqlite3"), sync=False)
             await bot.setup_hook()
             names = sorted(c.qualified_name for c in bot.tree.walk_commands())
+            # Reminders.check_due scheitert hier erwartbar an wait_until_ready() (kein echtes
+            # Login in diesem Test) — Task sauber abwarten statt "exception was never retrieved".
+            task = bot.get_cog("Reminders").check_due.get_task()
             bot.get_cog("Reminders").check_due.cancel()
+            if task:
+                with contextlib.suppress(Exception):
+                    await task
+            await bot.get_cog("DpsWebhook").runner.cleanup()
             await bot.db.close()
             await bot.get_cog("Music").session.close()
             return names
@@ -30,7 +38,7 @@ def test_all_commands_register():
                      "setup log-kanal", "setup temp-voice", "setup panel", "setup management-kanal",
                      "setup verifizierung", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
-                     "erinnere", "erinnerungen", "erinnerung-loeschen",
+                     "erinnere", "erinnerungen", "erinnerung-loeschen", "dps-webhook",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -131,6 +139,26 @@ def test_reminder_parsing():
 
     with pytest.raises(Exception):
         parse_when("irgendwann", now)
+
+
+def test_dps_embed():
+    from bot.cogs.dps import build_embed
+
+    assert build_embed({"party": []}) is None
+    assert build_embed({}) is None
+
+    e = build_embed({
+        "target": "Kromede", "duration_s": 95,
+        "party": [
+            {"name": "Alice", "cls": "cleric", "dps": 1000, "dmg": 95000, "pct": 20.0},
+            {"name": "Bob", "cls": "gladiator", "dps": 5000, "dmg": 475000, "pct": 80.0},
+        ],
+    })
+    assert "Kromede" in e.title
+    # Nach DPS absteigend sortiert, trotz Reihenfolge im Payload
+    assert e.description.index("Bob") < e.description.index("Alice")
+    assert "5.000 DPS" in e.description
+    assert "95 s" in e.footer.text
 
 
 def test_panel_regex():

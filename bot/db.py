@@ -139,6 +139,13 @@ class Database:
         """Server-IDs, bei denen `key` gesetzt ist (z. B. für Neustart-Registrierung persistenter Views)."""
         return [gid for gid, kv in self._settings.items() if key in kv]
 
+    def guild_for_value(self, key: str, value: str) -> int | None:
+        """Server-ID, bei der `key` genau `value` ist (z. B. Token → Server beim DPS-Webhook)."""
+        for gid in self.guilds_with(key):
+            if self.get(gid, key) == value:
+                return gid
+        return None
+
     async def set(self, guild_id: int, key: str, value: str | int | bool | None) -> None:
         """Setzt einen Wert, `None` löscht ihn."""
         assert self.conn

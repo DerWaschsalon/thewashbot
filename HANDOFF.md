@@ -34,6 +34,9 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
 - **Erinnerungen**: `/erinnere wann:2h|30m|1d2h|18:30|24.12. 18:00 text:… privat:`, `/erinnerungen`,
   `/erinnerung-loeschen`. Hintergrund-Task prüft alle 30s, alles in Europe/Berlin (`tzdata` in
   requirements.txt).
+- **DeckBar-Gruppen-DPS**: `/dps-webhook kanal:` richtet einen Token+Kanal ein, der Bot hört per
+  aiohttp auf Port 8787 (`bot/cogs/dps.py`) auf `POST /dps/<token>` und postet ein Embed (ein Post
+  pro Gruppe). Gegenstück fehlt noch in DeckBar selbst — siehe Übergabe weiter unten.
 
 ## Noch zu bauen (Daves Auswahl)
 
@@ -65,3 +68,22 @@ Fehlende MEE6-Funktionen:
 Abhängigkeiten dafür: `pillow`, `tzdata` in requirements.txt ergänzen.
 Discord erlaubt höchstens 100 Top-Level-Slash-Befehle; neue Funktionen als Gruppen anlegen
 (`/level …`, `/mod …`, `/ticket …`) und die Grenze im Test prüfen.
+
+## Offen: DeckBar-Seite der Gruppen-DPS-Integration
+
+Dave hat mit gamunex (Betreiber von github.com/gamunex/deckbar) abgestimmt, dass DeckBar bei
+Kampfende den Gruppen-Stand an den oben beschriebenen Bot-Webhook schickt (eine PR dorthin, wie
+bei den bisherigen DeckBar-Änderungen von Dave). Noch zu bauen, in `~/Projekte/deckbar` bzw. im
+Fork `Navonex/deckbar`:
+
+- `capture/src/view.rs`: `Row`/`Candidate` um ein `party: bool` ergänzen, aus
+  `PersonalData.combat_power != 0` (siehe `capture/a2tools/src-tauri/src/entity/personal_data.rs`:
+  combat_power kommt nur aus dem Partei-Roster-Paket, 0 = nicht in der eigenen Gruppe). Die
+  aktuelle `build()`-Funktion zeigt aktuell alle erkannten Spieler in der Nähe, nicht nur die
+  eigene Gruppe.
+- `daemon/deckbar_daemon/dps.py`: `DpsFeed.on_combat`-Callback feuert schon bei Kampfende
+  (`active: bool` wird `False`) — dort den letzten Stand (nur `party: true`-Zeilen) per POST an
+  die konfigurierte Bot-Webhook-URL schicken.
+- Neue Einstellung (Webhook-URL) in `dps.yaml` + Web-UI (`daemon/deckbar_daemon/web/`).
+- Payload-Format, das der Bot erwartet: siehe `bot/cogs/dps.py` im thewashbot-Repo
+  (`{"target": …, "duration_s": …, "party": [{"name", "cls", "dps", "dmg", "pct"}]}`).

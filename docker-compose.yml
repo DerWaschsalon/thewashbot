@@ -4,5 +4,7 @@ services:
     container_name: thewashbot
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "8787:8787"   # DeckBar-Gruppen-DPS-Webhook, siehe /setup dps-webhook
     volumes:
       - ./data:/data
