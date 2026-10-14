@@ -45,12 +45,15 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
   in db.py um events/filters/enabled/state/error erweitert (mit Migration für schon bestehende
   Installationen, siehe `Database._migrate`). Nächster Dienst (YouTube/Twitch/RSS/…) muss nur
   `Provider` implementieren und sich in `PROVIDERS` eintragen — die Discord-Seite ändert sich nicht.
+- **Tickets**: `bot/cogs/tickets.py`. `/setup tickets rolle:` (auch im Klick-Panel) legt die
+  Team-Rolle fest, `/ticket-panel` postet das Panel (Frage/Meldung/Bewerbung → Modal → privater
+  Thread, Team-Rolle + Ersteller werden per `thread.add_user` hinzugefügt). „Schließen“ im Thread
+  sperrt ihn und schickt den Verlauf als `.txt` in den Log-Kanal (`tickets`-Tabelle für
+  Kurzverlauf/Statistik später).
 
 ## Noch zu bauen (Daves Auswahl)
 
 Gewählt:
-- **Tickets**: Panel mit Buttons (Frage, Meldung, Bewerbung) → Modal → privater Thread mit Team-Rolle,
-  „Schließen“-Button, Verlauf als .txt in den Log-Kanal.
 - **Voice-Statistik**: Zeit im Sprachkanal (nicht allein, nicht AFK/taub), optional XP pro Minute.
 - **Starboard**: ⭐ ab Schwelle (Standard 3) → Highlight-Kanal, Zähler aktualisieren.
 - **Web-Dashboard**: aiohttp im selben Prozess. Login per `/dashboard` (Einmal-Link mit signiertem

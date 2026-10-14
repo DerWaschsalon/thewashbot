@@ -176,6 +176,24 @@ class DjRoleView(discord.ui.View):
         self.add_item(BackButton(panel))
 
 
+class TicketTeamRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Team-Rolle für Tickets wählen …", row=0, custom_id="setup:select:ticket_team_role")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.panel.cog.db.set(interaction.guild_id, "ticket_team_role", self.values[0].id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
+
+class TicketTeamRoleView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(TicketTeamRoleSelect(panel))
+        self.add_item(ClearButton("Team-Rolle aus", "ticket_team_role", panel))
+        self.add_item(BackButton(panel))
+
+
 class TempVoiceSelect(discord.ui.ChannelSelect):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(placeholder="Vorhandenen Sprachkanal wählen …", channel_types=[discord.ChannelType.voice], row=0,
@@ -334,6 +352,11 @@ class SettingsPanel(discord.ui.View):
             embed=home_embed(), view=NotificationsHomeView(notif_cog, self.guild, self.persistent)
         )
 
+    @discord.ui.button(label="Tickets", emoji="🎫", style=discord.ButtonStyle.secondary, row=2,
+                       custom_id="setup:open:ticket_team_role")
+    async def tickets(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=TicketTeamRoleView(self))
+
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
 
@@ -366,6 +389,7 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="Spamschutz", value="an" if db.get_bool(guild.id, "antispam", True) else "aus")
         e.add_field(name="Einladungslinks", value="erlaubt" if db.get_bool(guild.id, "allow_invites") else "werden gelöscht")
         e.add_field(name="DPS-Webhook (DeckBar)", value=fmt_channel(guild, db.get_int(guild.id, "dps_webhook_channel")))
+        e.add_field(name="Ticket-Team-Rolle", value=fmt_role(guild, db.get_int(guild.id, "ticket_team_role")))
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -486,6 +510,15 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         await interaction.response.send_message(
             f"Ab {schwelle} Verwarnungen in Folge: automatisch {aktion}"
             f"{' (1 Std.)' if aktion == 'timeout' else ''}.", ephemeral=True
+        )
+
+    @app_commands.command(name="tickets", description="Team-Rolle für Tickets festlegen (sieht neue Tickets, darf schließen)")
+    @app_commands.describe(rolle="Rolle, die zu jedem neuen Ticket-Thread hinzugefügt wird")
+    async def tickets_settings(self, interaction: discord.Interaction, rolle: discord.Role | None = None):
+        await self.db.set(interaction.guild_id, "ticket_team_role", rolle and rolle.id)
+        await interaction.response.send_message(
+            f"Team-Rolle für Tickets: {rolle.mention}. Panel mit `/ticket-panel` posten."
+            if rolle else "Team-Rolle entfernt.", ephemeral=True
         )
 
     @app_commands.command(name="temp-voice", description="„Join to create“-Kanal anlegen oder festlegen")

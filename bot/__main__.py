@@ -24,6 +24,7 @@ COGS = [
     "bot.cogs.reminders",
     "bot.cogs.dps",
     "bot.cogs.notifications",
+    "bot.cogs.tickets",
 ]
 
 

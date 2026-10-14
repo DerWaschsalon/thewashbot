@@ -43,6 +43,7 @@ def test_all_commands_register():
                      "setup verifizierung", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
                      "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook",
+                     "setup tickets", "ticket-panel",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -115,11 +116,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 8  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 9  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 9  # inkl. Schließen
+    assert len(ephemeral.children) == 10  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -243,6 +244,17 @@ def test_github_provider_filters_and_baseline_skip():
         assert notes == []  # Pre-Release durch Filter ausgeschlossen
 
     run(go())
+
+
+def test_ticket_panel_custom_ids_roundtrip():
+    from bot.cogs.tickets import KINDS, PANEL_PREFIX
+
+    view = __import__("bot.cogs.tickets", fromlist=["TicketPanelView"]).TicketPanelView()
+    ids = {item.custom_id for item in view.children}
+    assert ids == {f"{PANEL_PREFIX}{k}" for k in KINDS}
+    # Jede custom_id muss sich eindeutig auf eine bekannte Ticket-Art zurückführen lassen
+    for cid in ids:
+        assert cid[len(PANEL_PREFIX):] in KINDS
 
 
 def test_dps_embed():
