@@ -154,6 +154,8 @@ kein eigenes Gruppensystem/API/WebUI.
    „Dungeon-Runs → Discord“ (oder `~/.config/deckbar/runs.yaml`, Feld `webhook`). DeckBar postet
    dann wie gewohnt selbst, ganz ohne den Bot zu kennen.
 3. `/aion kanal:#der-kanal` in Discord — ab da beobachtet der Bot diesen Kanal und filtert Duplikate.
+   Geht auch über das Klick-Panel (`/setup panel` → „AION-2-Filter") oder im Web-Dashboard unter
+   „AION-2-Filter".
 
 Erkennung: gleicher Dungeon-Name, gleiche Boss-Anzahl/-Siege, Kampfzeit und Startzeit nah beieinander
 (DeckBars Text hat nur Minuten-Genauigkeit bei der Startzeit). Ein Spieler-Filter nach Namen ist

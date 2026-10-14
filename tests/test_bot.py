@@ -117,11 +117,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 9  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 10  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 10  # inkl. Schließen
+    assert len(ephemeral.children) == 11  # inkl. Schließen
 
 
 def test_reminder_parsing():

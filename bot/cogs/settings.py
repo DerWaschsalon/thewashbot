@@ -256,6 +256,64 @@ class DpsWebhookView(discord.ui.View):
         self.add_item(BackButton(panel))
 
 
+class AionSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Kanal für AION-2-Duplikatfilter wählen …", channel_types=[discord.ChannelType.text],
+                         row=0, custom_id="setup:select:aion")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = self.values[0]
+        await self.panel.cog.db.set(interaction.guild_id, "aion_channel", channel.id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=AionView(self.panel))
+        await interaction.followup.send(
+            f"AION-2-Duplikatfilter läuft jetzt für {channel.mention}.", ephemeral=True,
+        )
+
+
+class AionTokenButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="API-Token erzeugen/anzeigen", emoji="🔑", style=discord.ButtonStyle.secondary,
+                         row=1, custom_id="setup:aion_token")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        import secrets
+
+        db = self.panel.cog.db
+        token = db.get(interaction.guild_id, "aion_api_token")
+        if not token:
+            token = secrets.token_urlsafe(24)
+            await db.set(interaction.guild_id, "aion_api_token", token)
+        aion_cog = self.panel.cog.bot.get_cog("AionDedup")
+        await interaction.response.send_message(
+            f"API-Variante (braucht eine DeckBar-Änderung):\n`POST {aion_cog.api_url()}`\n"
+            f"`Authorization: Bearer {token}`\n\nGeheim halten. Für einen neuen Token (macht den "
+            "alten ungültig): `/aion token:True`.",
+            ephemeral=True,
+        )
+
+
+class AionOffButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="AION-Filter aus", emoji="✖️", style=discord.ButtonStyle.danger,
+                         row=1, custom_id="setup:aion_off")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.panel.cog.db.set(interaction.guild_id, "aion_channel", None)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=AionView(self.panel))
+
+
+class AionView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(AionSelect(panel))
+        self.add_item(AionTokenButton(panel))
+        self.add_item(AionOffButton(panel))
+        self.add_item(BackButton(panel))
+
+
 class AntispamView(discord.ui.View):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(timeout=None if panel.persistent else 180)
@@ -344,6 +402,11 @@ class SettingsPanel(discord.ui.View):
     async def dps_webhook(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=DpsWebhookView(self))
 
+    @discord.ui.button(label="AION-2-Filter", emoji="🗡️", style=discord.ButtonStyle.secondary, row=2,
+                       custom_id="setup:open:aion")
+    async def aion(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=AionView(self))
+
     @discord.ui.button(label="Benachrichtigungen", emoji="🔔", style=discord.ButtonStyle.secondary, row=2,
                        custom_id="setup:open:notifications")
     async def notifications(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -391,6 +454,7 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="Spamschutz", value="an" if db.get_bool(guild.id, "antispam", True) else "aus")
         e.add_field(name="Einladungslinks", value="erlaubt" if db.get_bool(guild.id, "allow_invites") else "werden gelöscht")
         e.add_field(name="DPS-Webhook (DeckBar)", value=fmt_channel(guild, db.get_int(guild.id, "dps_webhook_channel")))
+        e.add_field(name="AION-2-Duplikatfilter", value=fmt_channel(guild, db.get_int(guild.id, "aion_channel")))
         ticket_roles = [fmt_role(guild, i) for i in db.get_ids(guild.id, "ticket_team_roles")]
         e.add_field(name="Ticket-Team-Rollen", value=", ".join(ticket_roles) if ticket_roles else "–")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)

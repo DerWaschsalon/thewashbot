@@ -54,7 +54,7 @@ def esc(text) -> str:
 
 NAV = [
     ("/", "Übersicht"), ("/general", "Allgemein"), ("/verification", "Verifizierung"),
-    ("/tickets", "Tickets"), ("/dps", "DPS-Webhook"), ("/warnings", "Verwarnungen"),
+    ("/tickets", "Tickets"), ("/dps", "DPS-Webhook"), ("/aion", "AION-2-Filter"), ("/warnings", "Verwarnungen"),
     ("/notifications", "Benachrichtigungen"), ("/matrix", "Sichtbarkeit"),
 ]
 
@@ -175,6 +175,8 @@ class Dashboard(commands.Cog):
             web.get("/verification", self.page_verification), web.post("/verification", self.post_verification),
             web.get("/tickets", self.page_tickets), web.post("/tickets", self.post_tickets),
             web.get("/dps", self.page_dps), web.post("/dps", self.post_dps),
+            web.get("/aion", self.page_aion), web.post("/aion", self.post_aion),
+            web.post("/aion/token", self.post_aion_token),
             web.get("/warnings", self.page_warnings), web.post("/warnings", self.post_warnings),
             web.get("/notifications", self.page_notifications),
             web.post("/notifications/{id}/toggle", self.post_notification_toggle),
@@ -538,6 +540,55 @@ class Dashboard(commands.Cog):
             return self._redirect("/dps", "Kein Kanal gewählt, nichts geändert.")
         await ensure_webhook(self.db, guild.id, int(channel_id))
         return self._redirect("/dps", "Gespeichert.")
+
+    # ---- AION-2-Duplikatfilter -------------------------------------------------------------------
+
+    async def page_aion(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        aion = self.bot.get_cog("AionDedup")
+        token = self.db.get(guild.id, "aion_api_token")
+        token_html = f"<code>{esc(token)}</code>" if token else "noch nicht erzeugt"
+        body = f"""
+<form method="post" class="card">
+  <h2>Ziel-Kanal</h2>
+  <select name="channel">{channel_options(guild, self.db.get_int(guild.id, "aion_channel"))}</select>
+  <div class="hint">Leer lassen (erster Eintrag) zum Abschalten.</div>
+  <button type="submit">Speichern</button>
+</form>
+<form method="post" action="/aion/token" class="card">
+  <h2>API-Variante (braucht eine DeckBar-Änderung)</h2>
+  <div class="hint">Endpunkt: <code>{esc(aion.api_url())}</code></div>
+  <div class="hint">Token: {token_html}</div>
+  <button type="submit">Neuen Token erzeugen (macht den alten ungültig)</button>
+</form>"""
+        return web.Response(
+            text=layout("AION-2-Duplikatfilter", body, user=self._user_ctx(request), active="/aion",
+                        flash=self._flash(request)),
+            content_type="text/html",
+        )
+
+    async def post_aion(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        channel_id = form.get("channel")
+        await self.db.set(guild.id, "aion_channel", int(channel_id) if channel_id else None)
+        return self._redirect("/aion", "Gespeichert.")
+
+    async def post_aion_token(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        import secrets
+
+        await self.db.set(guild.id, "aion_api_token", secrets.token_urlsafe(24))
+        return self._redirect("/aion", "Neuer Token erzeugt.")
 
     # ---- Verwarnungen --------------------------------------------------------------------------
 
