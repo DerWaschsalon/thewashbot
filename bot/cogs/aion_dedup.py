@@ -22,7 +22,11 @@ Zwei unabhängige Wege, je nachdem ob DeckBar selbst geändert wurde:
          "dungeon": "Ferocious Horn Den", "difficulty": "Normal",
          "bosses_total": 3, "bosses_killed": 3,
          "start_ms": 1760445123000, "fight_ms": 350000,
-         "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}, …]
+         "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}, …],
+         "bosses": [                                          # optional, für DPS pro Boss
+           {"name": "Boss 1", "players": [{"name": "ReZero", "damage": 4200000, "dps": 41000}, …]},
+           …
+         ]
        }
 """
 
@@ -119,6 +123,21 @@ def validate_fight_payload(data: dict) -> str | None:
             return "players[].name fehlt"
         if not isinstance(p.get("damage"), (int, float)):
             return "players[].damage fehlt oder ist keine Zahl"
+    bosses = data.get("bosses")
+    if bosses is not None:
+        if not isinstance(bosses, list):
+            return "bosses muss eine Liste sein"
+        for b in bosses:
+            if not isinstance(b, dict) or not isinstance(b.get("name"), str) or not b["name"].strip():
+                return "bosses[].name fehlt"
+            boss_players = b.get("players")
+            if not isinstance(boss_players, list) or not boss_players:
+                return "bosses[].players fehlt oder ist leer"
+            for p in boss_players:
+                if not isinstance(p, dict) or not isinstance(p.get("name"), str) or not p["name"].strip():
+                    return "bosses[].players[].name fehlt"
+                if not isinstance(p.get("damage"), (int, float)):
+                    return "bosses[].players[].damage fehlt oder ist keine Zahl"
     return None
 
 
@@ -145,7 +164,23 @@ def merge_players(reports: list[dict]) -> list[dict]:
     return sorted(best.values(), key=lambda p: -p["damage"])
 
 
-def build_run_embed(run: dict, players: list[dict], reporters: int) -> discord.Embed:
+def merge_bosses(reports: list[dict]) -> list[dict]:
+    """Pro Boss (Reihenfolge nach erster Meldung) die Spieler mergen wie bei merge_players."""
+    order: list[str] = []
+    per_boss: dict[str, list[dict]] = {}
+    for report in reports:
+        for b in report.get("bosses") or []:
+            name = b["name"].strip()
+            if name not in per_boss:
+                per_boss[name] = []
+                order.append(name)
+            per_boss[name].append({"players": b["players"]})
+    return [{"name": name, "players": merge_players(per_boss[name])} for name in order]
+
+
+def build_run_embed(
+    run: dict, players: list[dict], reporters: int, bosses: list[dict] | None = None
+) -> discord.Embed:
     title = f"⚔️ {run['dungeon']}" + (f" ({run['difficulty']})" if run.get("difficulty") else "")
     lines = []
     for i, p in enumerate(players[:15]):
@@ -155,6 +190,9 @@ def build_run_embed(run: dict, players: list[dict], reporters: int) -> discord.E
     e = discord.Embed(title=title, colour=discord.Colour.gold(), description="\n".join(lines))
     e.add_field(name="Bosse", value=f"{run['bosses_killed']}/{run['bosses_total']} besiegt")
     e.add_field(name="Kampfzeit", value=f"{minutes}:{seconds:02d}")
+    for b in (bosses or [])[:20]:
+        boss_lines = [f"**{p['name']}**  {fmt_dps(p['dps'])}" for p in b["players"][:10]]
+        e.add_field(name=f"🗡️ {b['name']}", value="\n".join(boss_lines) or "–", inline=False)
     e.set_footer(text=f"AION-2 · {reporters} DeckBar-Meldung(en) zusammengeführt")
     return e
 
@@ -257,6 +295,7 @@ class AionDedup(commands.Cog):
             "dungeon": data["dungeon"].strip(), "difficulty": (data.get("difficulty") or "").strip() or None,
             "bosses_total": int(data["bosses_total"]), "bosses_killed": int(data["bosses_killed"]),
             "start_ms": int(data["start_ms"]), "fight_ms": int(data["fight_ms"]), "players": data["players"],
+            "bosses": data.get("bosses") or [],
         }
         clusters = self.api_pending.setdefault(guild_id, [])
         for c in clusters:
@@ -281,7 +320,8 @@ class AionDedup(commands.Cog):
             log.warning("AION-API: Zielkanal %s nicht gefunden", channel_id)
             return
         players = merge_players(cluster.reports)
-        embed = build_run_embed(cluster.run, players, len(cluster.reports))
+        bosses = merge_bosses(cluster.reports)
+        embed = build_run_embed(cluster.run, players, len(cluster.reports), bosses)
         try:
             await channel.send(embed=embed)
         except discord.HTTPException as e:

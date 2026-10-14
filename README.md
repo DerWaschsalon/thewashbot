@@ -184,9 +184,16 @@ nicht umgesetzt ist — siehe `HANDOFF.md`.
      "dungeon": "Ferocious Horn Den", "difficulty": "Normal",
      "bosses_total": 3, "bosses_killed": 3,
      "start_ms": 1760445123000, "fight_ms": 350000,
-     "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}, …]
+     "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}, …],
+     "bosses": [                                         // optional, für DPS pro Boss
+       {"name": "Boss 1", "players": [{"name": "ReZero", "damage": 4200000, "dps": 41000}, …]},
+       …
+     ]
    }
    ```
+
+   `bosses` ist optional — ohne das Feld zeigt das Embed nur die Gesamt-Rangliste, mit dem Feld
+   zusätzlich ein eigenes Feld pro Boss mit der DPS je Spieler für genau diesen Kampf.
 
 Beide Varianten laufen unabhängig nebeneinander — schadet nichts, beide gleichzeitig eingerichtet
 zu haben.

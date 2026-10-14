@@ -124,10 +124,15 @@ statt) ein `POST` an die neue Bot-URL mit dem erwarteten Payload:
   "dungeon": "Ferocious Horn Den", "difficulty": "Normal",
   "bosses_total": 3, "bosses_killed": 3,
   "start_ms": 1760445123000, "fight_ms": 350000,
-  "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}]
+  "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}],
+  "bosses": [
+    {"name": "Boss 1", "players": [{"name": "ReZero", "damage": 4200000, "dps": 41000}]}
+  ]
 }
 ```
 
-`Run.bosses()` und `Fight.players` liefern die nötigen Werte bereits (siehe `Run`/`Fight`/`Player`-
-Dataclasses in `runs.py`). Neue Einstellung (Bot-URL + Token) in `runs.yaml` + Web-UI ergänzen,
-analog zum bestehenden `webhook`-Feld dort.
+`bosses` ist optional, bringt aber DPS je Boss statt nur den Gesamtwert fürs Embed — pro Boss aus
+`Run.bosses()` eine `Fight` mit eigener `players`-Liste (gleiches Format wie oben, aber nur für
+diesen einen Kampf). `Run.bosses()` und `Fight.players` liefern die nötigen Werte bereits (siehe
+`Run`/`Fight`/`Player`-Dataclasses in `runs.py`). Neue Einstellung (Bot-URL + Token) in `runs.yaml`
++ Web-UI ergänzen, analog zum bestehenden `webhook`-Feld dort.

@@ -330,6 +330,34 @@ def test_aion_api_merge_and_embed():
     assert "2 DeckBar-Meldung" in embed.footer.text
 
 
+def test_aion_api_boss_dps():
+    from bot.cogs.aion_dedup import build_run_embed, merge_bosses, validate_fight_payload
+
+    base = {"dungeon": "Ferocious Horn Den", "bosses_total": 2, "bosses_killed": 2,
+            "start_ms": 1_760_445_123_000, "fight_ms": 350_000,
+            "players": [{"name": "ReZero", "damage": 13_000_000, "dps": 37_000}],
+            "bosses": [
+                {"name": "Boss 1", "players": [{"name": "ReZero", "damage": 4_000_000, "dps": 40_000}]},
+                {"name": "Boss 2", "players": [{"name": "ReZero", "damage": 9_000_000, "dps": 35_000}]},
+            ]}
+    assert validate_fight_payload(base) is None
+    assert validate_fight_payload({**base, "bosses": [{"name": "X"}]}) is not None
+    assert validate_fight_payload({**base, "bosses": "nope"}) is not None
+
+    reportB = {**base, "bosses": [
+        {"name": "Boss 1", "players": [{"name": "Gamunex", "damage": 3_000_000, "dps": 30_000}]},
+        {"name": "Boss 2", "players": [{"name": "ReZero", "damage": 9_500_000, "dps": 36_000}]},  # höher -> gewinnt
+    ]}
+    bosses = merge_bosses([base, reportB])
+    assert [b["name"] for b in bosses] == ["Boss 1", "Boss 2"]
+    assert {p["name"] for p in bosses[0]["players"]} == {"ReZero", "Gamunex"}
+    assert bosses[1]["players"][0]["damage"] == 9_500_000
+
+    embed = build_run_embed(base, base["players"], reporters=2, bosses=bosses)
+    field_names = [f.name for f in embed.fields]
+    assert "🗡️ Boss 1" in field_names and "🗡️ Boss 2" in field_names
+
+
 def test_aion_parse_and_match():
     from bot.cogs.aion_dedup import parse_run, same_run
 
