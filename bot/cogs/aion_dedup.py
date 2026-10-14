@@ -70,6 +70,14 @@ def fmt_dps(n: float) -> str:
     return f"{fmt_num(n)}/s"
 
 
+def bar(value: float, max_value: float, width: int = 10) -> str:
+    """Balkengrafik relativ zum besten Wert in der Gruppe, à la Details!/Raider.io-DPS-Meter."""
+    if max_value <= 0:
+        return "░" * width
+    filled = max(0, min(width, round(width * value / max_value)))
+    return "█" * filled + "░" * (width - filled)
+
+
 # ---- Variante 1: Text-Nachrichten im bestehenden DeckBar-Webhook-Kanal filtern --------------
 
 
@@ -182,16 +190,23 @@ def build_run_embed(
     run: dict, players: list[dict], reporters: int, bosses: list[dict] | None = None
 ) -> discord.Embed:
     title = f"⚔️ {run['dungeon']}" + (f" ({run['difficulty']})" if run.get("difficulty") else "")
+    max_damage = players[0]["damage"] if players else 0
     lines = []
     for i, p in enumerate(players[:15]):
         rank = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
-        lines.append(f"{rank} **{p['name']}**  {fmt_num(p['damage'])}  {fmt_dps(p['dps'])}")
+        lines.append(
+            f"{rank} **{p['name']}**  `{bar(p['damage'], max_damage)}`  {fmt_num(p['damage'])}  {fmt_dps(p['dps'])}"
+        )
     minutes, seconds = divmod(round(run["fight_ms"] / 1000), 60)
     e = discord.Embed(title=title, colour=discord.Colour.gold(), description="\n".join(lines))
     e.add_field(name="Bosse", value=f"{run['bosses_killed']}/{run['bosses_total']} besiegt")
     e.add_field(name="Kampfzeit", value=f"{minutes}:{seconds:02d}")
     for b in (bosses or [])[:20]:
-        boss_lines = [f"**{p['name']}**  {fmt_dps(p['dps'])}" for p in b["players"][:10]]
+        boss_players = b["players"][:10]
+        max_dps = max((p["dps"] for p in boss_players), default=0)
+        boss_lines = [
+            f"**{p['name']}**  `{bar(p['dps'], max_dps, width=8)}`  {fmt_dps(p['dps'])}" for p in boss_players
+        ]
         e.add_field(name=f"🗡️ {b['name']}", value="\n".join(boss_lines) or "–", inline=False)
     e.set_footer(text=f"AION-2 · {reporters} DeckBar-Meldung(en) zusammengeführt")
     return e

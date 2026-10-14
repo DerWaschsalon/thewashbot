@@ -299,6 +299,13 @@ def test_aion_api_merge_and_embed():
     assert fmt_num(8_080) == "8.1k"
     assert fmt_dps(38_000) == "38.0k/s"
 
+    from bot.cogs.aion_dedup import bar
+
+    assert bar(10, 10, width=10) == "█" * 10
+    assert bar(0, 10, width=10) == "░" * 10
+    assert bar(5, 10, width=10) == "█" * 5 + "░" * 5
+    assert bar(5, 0, width=10) == "░" * 10  # kein Höchstwert -> leer statt Division durch 0
+
     base = {"dungeon": "Ferocious Horn Den", "bosses_total": 3, "bosses_killed": 3,
             "start_ms": 1_760_445_123_000, "fight_ms": 350_000,
             "players": [{"name": "ReZero", "damage": 13_000_000, "dps": 37_000}]}
