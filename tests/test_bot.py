@@ -1,6 +1,7 @@
 """Offline-Tests: Befehle laden, Datenbank, Warteschlangen-Logik, Quellen-Erkennung."""
 import asyncio
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ def test_all_commands_register():
             bot = Bot(Database(Path(d) / "t.sqlite3"), sync=False)
             await bot.setup_hook()
             names = sorted(c.qualified_name for c in bot.tree.walk_commands())
+            bot.get_cog("Reminders").check_due.cancel()
             await bot.db.close()
             await bot.get_cog("Music").session.close()
             return names
@@ -28,6 +30,7 @@ def test_all_commands_register():
                      "setup log-kanal", "setup temp-voice", "setup panel", "setup management-kanal",
                      "setup verifizierung", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
+                     "erinnere", "erinnerungen", "erinnerung-loeschen",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -105,6 +108,29 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
     assert len(ephemeral.children) == 7  # inkl. Schließen
+
+
+def test_reminder_parsing():
+    from zoneinfo import ZoneInfo
+
+    from bot.cogs.reminders import parse_when
+
+    tz = ZoneInfo("Europe/Berlin")
+    now = datetime(2026, 10, 14, 12, 0, tzinfo=tz)
+
+    assert parse_when("2h", now) == now + timedelta(hours=2)
+    assert parse_when("30m", now) == now + timedelta(minutes=30)
+    assert parse_when("1d2h", now) == now + timedelta(days=1, hours=2)
+
+    assert parse_when("18:30", now) == now.replace(hour=18, minute=30)
+    assert parse_when("08:00", now) == now.replace(hour=8, minute=0) + timedelta(days=1)  # schon vorbei -> morgen
+
+    assert parse_when("24.12. 18:00", now) == datetime(2026, 12, 24, 18, 0, tzinfo=tz)
+    assert parse_when("1.1. 10:00", now) == datetime(2027, 1, 1, 10, 0, tzinfo=tz)  # schon vorbei -> nächstes Jahr
+    assert parse_when("24.12.2025 18:00", now) == datetime(2025, 12, 24, 18, 0, tzinfo=tz)  # Jahr explizit, kein Shift
+
+    with pytest.raises(Exception):
+        parse_when("irgendwann", now)
 
 
 def test_panel_regex():

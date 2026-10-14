@@ -21,6 +21,7 @@ COGS = [
     "bot.cogs.moderation",
     "bot.cogs.tempvoice",
     "bot.cogs.cleanup",
+    "bot.cogs.reminders",
 ]
 
 

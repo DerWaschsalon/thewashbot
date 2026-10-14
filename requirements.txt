@@ -1,3 +1,4 @@
 discord.py[voice]>=2.7,<3
 aiosqlite>=0.20
 yt-dlp[default]
+tzdata

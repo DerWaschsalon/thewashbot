@@ -31,6 +31,9 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
   `/setup verwarnungen` (automatische Strafe ab einstellbarer Schwelle: Timeout/Kick/Ban), DM an
   Betroffene. `/clear` und `/slowmode` aus der Liste unten noch offen (deckt sich mit
   `/aufraeumen nachrichten`, ggf. nicht mehr nötig).
+- **Erinnerungen**: `/erinnere wann:2h|30m|1d2h|18:30|24.12. 18:00 text:… privat:`, `/erinnerungen`,
+  `/erinnerung-loeschen`. Hintergrund-Task prüft alle 30s, alles in Europe/Berlin (`tzdata` in
+  requirements.txt).
 
 ## Noch zu bauen (Daves Auswahl)
 
@@ -39,7 +42,6 @@ Gewählt:
   „Schließen“-Button, Verlauf als .txt in den Log-Kanal.
 - **Voice-Statistik**: Zeit im Sprachkanal (nicht allein, nicht AFK/taub), optional XP pro Minute.
 - **Starboard**: ⭐ ab Schwelle (Standard 3) → Highlight-Kanal, Zähler aktualisieren.
-- **Erinnerungen**: `/erinnere wann:2h|30m|1d2h|18:30|24.12. 18:00 text:… privat:`; Liste, Löschen.
 - **Web-Dashboard**: aiohttp im selben Prozess. Login per `/dashboard` (Einmal-Link mit signiertem
   Token, 10 Min. gültig, nur „Server verwalten“), kein OAuth nötig. Formulare aus einem zentralen
   Schema (geplant: `bot/schema.py` mit Feldern key/label/type/section und Listen für

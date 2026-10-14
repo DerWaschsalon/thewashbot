@@ -16,6 +16,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Verwarnungen** | `/warn`, `/warnungen`, `/warnung-loeschen`, `/kick`, `/ban`, `/unban`, `/setup verwarnungen` | Verwarnungen mit Historie (DM an Betroffene), automatische Strafe ab einstellbarer Schwelle (Timeout/Kick/Ban). |
 | **Temp-Voice** | `/setup temp-voice`, `/vc name/limit/sperren/freigeben/einladen/uebernehmen` | Wer „➕ Kanal erstellen“ betritt, bekommt einen eigenen Sprachkanal, der leer wieder verschwindet. |
 | **Aufräumen** | `/aufraeumen nachrichten`, `/aufraeumen bots`, `/aufraeumen bericht` | Alte Nachrichten löschen (Filter nach Alter, Person, nur Bots), alte Bots entfernen, Bericht über tote Kanäle und leere Rollen. Immer erst mit Vorschau und Bestätigung. |
+| **Erinnerungen** | `/erinnere wann: text: privat:` | Zeit relativ (`2h`, `30m`, `1d2h`) oder absolut (`18:30`, `24.12. 18:00`). `/erinnerungen` zeigt eigene offene Erinnerungen, `/erinnerung-loeschen` entfernt eine. |
 | **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
