@@ -227,6 +227,8 @@ Bewusst nur in Discord: der mehrstufige Assistent für neue Benachrichtigungen, 
 Verifizierungs-Ersteinrichtung (beide wegen Vorschau/Bestätigung), Giveaways (keine
 Schlüssel/Wert-Einstellung) und der Server-Status (braucht den Docker-Socket, nur für `OWNER_ID`).
 
+**Reiner LAN-/Tailscale-Zugriff** (jeder, der den Bot aufruft, ist im selben Netz):
+
 1. Im Developer Portal unter **OAuth2** → **Redirects** genau diese URL eintragen:
    `http://<DASHBOARD_HOST>:<DASHBOARD_PORT>/callback` (Standard-Port 8789).
 2. `.env`: `DISCORD_CLIENT_ID` (General Information → Application ID), `DISCORD_CLIENT_SECRET`
@@ -234,6 +236,18 @@ Schlüssel/Wert-Einstellung) und der Server-Status (braucht den Docker-Socket, n
 3. `/setup dashboard rolle:@Admin` in Discord — nur Mitglieder mit dieser Rolle kommen rein (ohne
    das: nur wer „Server verwalten“ hat).
 4. Port 8789 ist in `docker-compose.yml` schon freigegeben. Aufrufen: `http://<DASHBOARD_HOST>:8789`.
+
+**Zugriff auch von außerhalb des LAN/Tailnets** (z. B. ein Mitarbeiter ohne Tailscale-Zugang):
+eine LAN-IP wie `192.168.1.10` ist von außen nicht erreichbar — dafür einen Cloudflare Tunnel auf
+`DASHBOARD_PORT` einrichten (eigener Hostname, von Cloudflare terminiertes https, kein Port in der
+öffentlichen URL) und statt Schritt 1/2 oben:
+
+1. Im Developer Portal unter **OAuth2** → **Redirects** genau `<DASHBOARD_PUBLIC_URL>/callback`
+   eintragen, z. B. `https://bot.example.com/callback` (`deckbarapi...` nur als Beispiel —
+   derselbe Tunnel kann auch schon für `AION_PUBLIC_URL` genutzt werden, beide zeigen auf denselben
+   `DASHBOARD_PORT`).
+2. `.env`: `DASHBOARD_PUBLIC_URL=https://bot.example.com` setzen (volle URL, kein
+   abschließender Slash) — hat Vorrang vor `DASHBOARD_HOST`/`DASHBOARD_PORT` beim Login-Redirect.
 
 Unter **Sichtbarkeit** gibt's zusätzlich eine Matrix (Kanal/Kategorie × Rolle): zeigt live, wer was
 sehen kann, Klick auf eine Zelle schaltet die Sichtbarkeit sofort um (nur „Sehen“, keine anderen

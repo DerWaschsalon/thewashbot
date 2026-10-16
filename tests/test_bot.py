@@ -471,6 +471,28 @@ def test_dashboard_login_redirect():
     run(go())
 
 
+def test_dashboard_base_url_prefers_public_url():
+    import os
+
+    from bot.cogs.dashboard import dashboard_base_url
+
+    keys = ["DASHBOARD_PUBLIC_URL", "DASHBOARD_HOST", "DASHBOARD_PORT"]
+    old = {k: os.environ.pop(k, None) for k in keys}
+    try:
+        os.environ["DASHBOARD_HOST"] = "192.168.1.10"
+        os.environ["DASHBOARD_PORT"] = "8789"
+        assert dashboard_base_url() == "http://192.168.1.10:8789"  # kein DASHBOARD_PUBLIC_URL -> LAN-Variante
+
+        os.environ["DASHBOARD_PUBLIC_URL"] = "https://bot.example.com/"
+        assert dashboard_base_url() == "https://bot.example.com"  # Vorrang, abschließender Slash weg
+    finally:
+        for k in keys:
+            if old[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = old[k]
+
+
 def test_dashboard_html_escaping():
     from bot.cogs.dashboard import esc
 

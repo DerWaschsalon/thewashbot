@@ -54,6 +54,13 @@ SESSIONS: dict[str, dict] = {}
 
 
 def dashboard_base_url() -> str:
+    """Basis-URL für den OAuth2-Redirect. `DASHBOARD_PUBLIC_URL` (volle URL, z. B. ein
+    Cloudflare-Tunnel-Hostname über https, ohne Port) hat Vorrang — sonst `http://<DASHBOARD_HOST>:
+    <DASHBOARD_PORT>` fürs reine LAN/Tailscale. Muss exakt zur im Developer Portal unter
+    OAuth2 → Redirects eingetragenen URL passen."""
+    public_url = os.getenv("DASHBOARD_PUBLIC_URL", "").strip()
+    if public_url:
+        return public_url.rstrip("/")
     host = os.getenv("DASHBOARD_HOST") or "<LAN-IP-DIESES-SERVERS>"
     port = os.getenv("DASHBOARD_PORT", str(DEFAULT_PORT))
     return f"http://{host}:{port}"
