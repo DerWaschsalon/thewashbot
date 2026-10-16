@@ -666,6 +666,32 @@ class BirthdayView(discord.ui.View):
         self.add_item(BackButton(panel))
 
 
+class VoiceXpModal(discord.ui.Modal, title="Sprachzeit-XP"):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__()
+        self.panel = panel
+        current = panel.cog.db.get_int(panel.guild.id, "voice_xp_per_minute") or 0
+        self.xp = discord.ui.TextInput(label="XP pro Minute im Sprachkanal (0 = aus)", default=str(current), max_length=4)
+        self.add_item(self.xp)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = str(self.xp.value).strip()
+        if not raw.isdigit() or not (0 <= int(raw) <= 1000):
+            return await interaction.response.send_message("Bitte eine Zahl von 0 bis 1000 eingeben.", ephemeral=True)
+        await self.panel.cog.db.set(interaction.guild_id, "voice_xp_per_minute", int(raw) or None)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
+
+class VoiceXpButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Sprachzeit-XP", emoji="🎙️", style=discord.ButtonStyle.secondary, row=4,
+                         custom_id="setup:voice_xp_btn")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(VoiceXpModal(self.panel))
+
+
 class VerifySetupChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(placeholder="Regel-Kanal wählen …", channel_types=[discord.ChannelType.text], row=0,
@@ -826,6 +852,7 @@ class SettingsPanel(discord.ui.View):
         self.cog = cog
         self.guild = guild
         self.persistent = persistent
+        self.add_item(VoiceXpButton(self))
         if not persistent:
             close = discord.ui.Button(label="Schließen", emoji="✖️", style=discord.ButtonStyle.danger, row=2)
             close.callback = self._close
@@ -982,6 +1009,8 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
                     value=f"{fmt_channel(guild, starboard_channel)} (ab {starboard_threshold} ⭐)" if starboard_channel else "aus")
         birthday_channel = db.get_int(guild.id, "birthday_channel")
         e.add_field(name="Geburtstagsgrüße", value=fmt_channel(guild, birthday_channel) if birthday_channel else "aus")
+        voice_xp = db.get_int(guild.id, "voice_xp_per_minute")
+        e.add_field(name="Sprachzeit-XP", value=f"{voice_xp} XP/Min." if voice_xp else "aus")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -1304,6 +1333,14 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         await self.db.set(interaction.guild_id, "birthday_channel", kanal and kanal.id)
         await interaction.response.send_message(
             f"Geburtstagsgrüße gehen jetzt nach {kanal.mention}." if kanal else "Geburtstagsgrüße sind aus.", ephemeral=True
+        )
+
+    @app_commands.command(name="sprachzeit-xp", description="XP pro Minute im Sprachkanal (0 = aus)")
+    @app_commands.describe(xp="XP pro Minute, die mitzählende Mitglieder im Sprachkanal bekommen")
+    async def voice_xp_settings(self, interaction: discord.Interaction, xp: app_commands.Range[int, 0, 1000] = 0):
+        await self.db.set(interaction.guild_id, "voice_xp_per_minute", xp or None)
+        await interaction.response.send_message(
+            f"Sprachzeit-XP: {xp} pro Minute." if xp else "Sprachzeit-XP ist aus.", ephemeral=True
         )
 
     @commands.Cog.listener()

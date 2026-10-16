@@ -28,7 +28,7 @@ def test_all_commands_register():
             for cog_name, loop_name in [
                 ("Reminders", "check_due"), ("Notifications", "poll_feeds"),
                 ("Bump", "check_due"), ("Stats", "refresh"), ("Birthdays", "check"),
-                ("Announcements", "check_due"),
+                ("Announcements", "check_due"), ("VoiceStats", "tick"),
             ]:
                 loop = getattr(bot.get_cog(cog_name), loop_name)
                 task = loop.get_task()
@@ -52,6 +52,7 @@ def test_all_commands_register():
                      "setup bots-zaehler", "umfrage", "geburtstag-setzen", "geburtstag-loeschen", "geburtstag",
                      "setup geburtstage", "embed-erstellen", "befehl-erstellen", "befehl-loeschen", "befehle",
                      "ankuendigung-erstellen", "ankuendigungen", "ankuendigung-loeschen",
+                     "sprachzeit", "setup sprachzeit-xp",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -124,11 +125,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 17  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 18  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 18  # inkl. Schließen
+    assert len(ephemeral.children) == 19  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -814,3 +815,39 @@ def test_announcement_due_rows_get_rescheduled():
             await db.close()
 
     run(go())
+
+
+def test_voicestats_qualifies_and_format():
+    from bot.cogs.voicestats import format_duration, qualifies
+
+    assert format_duration(90) == "1 Min."
+    assert format_duration(3661) == "1 Std. 1 Min."
+
+    class FakeVoiceState:
+        def __init__(self, self_deaf=False, deaf=False):
+            self.self_deaf, self.deaf = self_deaf, deaf
+
+    class FakeMember:
+        def __init__(self, bot=False, voice=None):
+            self.bot = bot
+            self.voice = voice
+
+    class FakeChannel:
+        def __init__(self, members, afk=False):
+            self.members = members
+            self.guild = type("G", (), {"afk_channel": self if afk else None})()
+
+    alice, bob = FakeMember(voice=FakeVoiceState()), FakeMember(voice=FakeVoiceState())
+    channel = FakeChannel([alice, bob])
+    assert qualifies(alice, channel) is True  # zu zweit, niemand taub -> zählt
+
+    alone_channel = FakeChannel([alice])
+    assert qualifies(alice, alone_channel) is False  # allein im Kanal -> zählt nicht
+
+    deaf_bob = FakeMember(voice=FakeVoiceState(self_deaf=True))
+    channel2 = FakeChannel([alice, deaf_bob])
+    assert qualifies(deaf_bob, channel2) is False  # selbst taub -> zählt nicht
+    assert qualifies(alice, channel2) is True  # alice selbst ist nicht taub, zählt weiter
+
+    afk_channel = FakeChannel([alice, bob], afk=True)
+    assert qualifies(alice, afk_channel) is False  # AFK-Kanal zählt nie
