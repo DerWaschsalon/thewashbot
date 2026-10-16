@@ -27,6 +27,8 @@ COGS = [
     "bot.cogs.tickets",
     "bot.cogs.dashboard",
     "bot.cogs.aion_dedup",
+    "bot.cogs.bump",
+    "bot.cogs.stats",
 ]
 
 

@@ -25,7 +25,10 @@ def test_all_commands_register():
             # Reminders.check_due und Notifications.poll_feeds scheitern hier erwartbar an
             # wait_until_ready() (kein echtes Login in diesem Test) — Tasks sauber abwarten statt
             # "exception was never retrieved".
-            for cog_name, loop_name in [("Reminders", "check_due"), ("Notifications", "poll_feeds")]:
+            for cog_name, loop_name in [
+                ("Reminders", "check_due"), ("Notifications", "poll_feeds"),
+                ("Bump", "check_due"), ("Stats", "refresh"),
+            ]:
                 loop = getattr(bot.get_cog(cog_name), loop_name)
                 task = loop.get_task()
                 loop.cancel()
@@ -44,7 +47,7 @@ def test_all_commands_register():
                      "setup verifizierung", "setup regeln-text", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
                      "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook", "setup dashboard", "aion",
-                     "setup tickets", "ticket-panel",
+                     "setup tickets", "ticket-panel", "setup bump", "setup mitglieder-zaehler",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -117,11 +120,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 10  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 15  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 11  # inkl. Schließen
+    assert len(ephemeral.children) == 16  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -492,3 +495,86 @@ def test_panel_regex():
     pat = re.compile(r"(?:(<a?:\w+:\d+>|[^\x00-\x7F\s]+)\s*)?<@&(\d+)>")
     got = [(m.group(1), m.group(2)) for m in pat.finditer("🎮 <@&1> und <@&2> <:aion:99> <@&3>")]
     assert got == [("🎮", "1"), (None, "2"), ("<:aion:99>", "3")]
+
+
+def test_bump_confirmation_detection():
+    import discord
+
+    from bot.cogs.bump import DISBOARD_BOT_ID, is_bump_confirmation
+
+    def fake_message(author_id, embeds):
+        return type("M", (), {"author": type("A", (), {"id": author_id})(), "embeds": embeds})()
+
+    success = discord.Embed(description="Bump done! :thumbsup: Check it out on disboard.org!")
+    cooldown = discord.Embed(description="Please wait another 23 minutes before bumping again.")
+
+    assert is_bump_confirmation(fake_message(DISBOARD_BOT_ID, [success])) is True
+    assert is_bump_confirmation(fake_message(DISBOARD_BOT_ID, [cooldown])) is False
+    assert is_bump_confirmation(fake_message(123, [success])) is False  # anderer Autor
+    assert is_bump_confirmation(fake_message(DISBOARD_BOT_ID, [])) is False  # kein Embed
+
+
+def test_bump_reminder_sends_role_mention():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.bump import Bump
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+            await db.set(1, "bump_channel", 42)
+            await db.set(1, "bump_role", 7)
+
+            sent = []
+            role = type("R", (), {"mention": "<@&7>"})()
+
+            class FakeChannel:
+                guild = type("G", (), {"get_role": staticmethod(lambda i: role)})()
+
+                async def send(self, text, **kwargs):
+                    sent.append(text)
+
+            cog = Bump.__new__(Bump)
+            cog.bot = type("B", (), {"get_channel": lambda self, i: FakeChannel()})()
+            cog.db = db
+
+            await cog._remind(1)
+            assert sent == ["<@&7> ⏰ Bump ist wieder möglich – wer mag, tippt `/bump`!"]
+
+            await db.close()
+
+    run(go())
+
+
+def test_member_count_channel_name():
+    from bot.cogs.stats import channel_name
+
+    guild = type("G", (), {"member_count": 123})()
+    assert channel_name(guild) == "👥 Mitglieder: 123"
+
+
+def test_new_panel_subviews_build_without_overflow():
+    """Discord erlaubt höchstens 5 Komponenten pro Zeile — jede neue Unteransicht des Klick-Panels
+    muss ohne ValueError konstruierbar sein, in beiden Verifizierungs-Zuständen."""
+    from pathlib import Path
+
+    from bot.cogs.settings import BumpView, DashboardRoleView, MemberCountView, SettingsPanel, WarnView, VerifyView
+    from bot.db import Database
+
+    cog = type("FakeCog", (), {})()
+    cog.db = Database(Path("/tmp/_unused_panel_subview_test.sqlite3"))
+    guild = type("G", (), {"id": 1})()
+    panel = SettingsPanel.__new__(SettingsPanel)
+    panel.cog, panel.guild, panel.persistent = cog, guild, True
+
+    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView]:
+        view = view_cls(panel)
+        assert all(item.custom_id for item in view.children)
+
+    for active in (True, False):
+        cog.db._settings[1] = {"verify_active": "1" if active else "0"}
+        view = VerifyView(panel)
+        assert all(item.custom_id for item in view.children)

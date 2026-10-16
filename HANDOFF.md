@@ -50,6 +50,27 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
   Thread, Team-Rolle + Ersteller werden per `thread.add_user` hinzugefügt). „Schließen“ im Thread
   sperrt ihn und schickt den Verlauf als `.txt` in den Log-Kanal (`tickets`-Tabelle für
   Kurzverlauf/Statistik später).
+- **Klick-Panel: vollständig**: `bot/cogs/settings.py` deckt jetzt alle `/setup`-Einstellungen ab,
+  nicht mehr nur eine Teilmenge. Neu dazugekommen: Verwarnungs-Schwelle+Strafe (`WarnView`),
+  Web-Dashboard-Rolle (`DashboardRoleView`), und die komplette Verifizierung inklusive
+  Ersteinrichtung mit Vorschau/Bestätigung (`VerifyView` → `VerifySetupChannelSelect` →
+  `VerifySetupRoleView` → geteilte Logik `apply_verification`/`turn_off_verification`, auch von
+  `/setup verifizierung` selbst genutzt). Jede neue Unteransicht folgt dem bestehenden Muster
+  (`timeout=None if panel.persistent else 180`, feste `custom_id`s) und überlebt damit Neustarts
+  über den schon vorhandenen `management-kanal`-Mechanismus ohne zusätzliche Änderungen an
+  `register_persistent_views`.
+- **Bump-Erinnerung (Disboard)**: `bot/cogs/bump.py`. `/setup bump kanal: rolle:` (auch im
+  Klick-Panel). Erkennt DISBOARDs Bump-Bestätigungs-Embed (`is_bump_confirmation`, Author-ID
+  `302050872383242240`) im festgelegten Kanal, merkt sich den Zeitpunkt (`bump_last`) und erinnert
+  nach 2 Stunden (`BUMP_INTERVAL_SECONDS`) per Ping im selben Kanal — `bump_reminded` verhindert
+  Mehrfach-Erinnerungen, wird bei der nächsten erkannten Bump-Bestätigung zurückgesetzt. Bewusst
+  **nur** eine Erinnerung, kein automatisches Bumpen (Selbst-Bot-artiges Verhalten, möglicher
+  Verstoß gegen Disboards eigene Regeln) — so vom Nutzer gewünscht.
+- **Mitglieder-Zähler**: `bot/cogs/stats.py`. `/setup mitglieder-zaehler kanal:` (auch im
+  Klick-Panel, mit sofortigem Update bei Auswahl). Benennt einen Sprachkanal zu „👥 Mitglieder: N“
+  um, bei Beitritt/Austritt sofort (gedrosselt auf höchstens alle 10 Minuten über
+  `member_count_last`, Discords Limit für Kanal-Umbenennungen) und zusätzlich per
+  `tasks.loop(minutes=10)` als Fallback.
 - **Web-Dashboard**: `bot/cogs/dashboard.py`, eigener aiohttp-Server (Port 8789). Login per
   Discord-OAuth2 (nur Scope `identify`, Rolle wird danach über den Bot selbst geprüft — keine
   weiteren Nutzer-Rechte nötig). Zugriff nur für die per `/setup dashboard` festgelegte Rolle
@@ -78,7 +99,9 @@ Fehlende MEE6-Funktionen:
 - **Zeitgesteuerte Ankündigungen** (Intervall in Minuten)
 - **Benachrichtigungen: weitere Dienste** (GitHub ist fertig, siehe oben): YouTube per RSS (ohne
   Schlüssel), Twitch nur mit TWITCH_CLIENT_ID/SECRET — jeweils als neuer `Provider` in `bot/notify/`
-- **Statistik-Kanäle** (Mitglieder, Bots; Umbenennen höchstens alle 10 Min.)
+- **Statistik-Kanäle**: Mitglieder-Zähler fertig (siehe oben, `bot/cogs/stats.py`). Bots-Zähler als
+  zweiter, separat einstellbarer Kanal noch offen (gleiches Muster, `guild.get_channel`-Filter auf
+  `member.bot`).
 - **Umfragen** (native Discord-Polls), **Giveaways** (Button, Reroll), **Geburtstage** (tägl. 9 Uhr
   Europe/Berlin), **Embed-Ersteller** (Modal)
 

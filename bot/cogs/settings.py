@@ -36,6 +36,80 @@ def fmt_role(guild: discord.Guild, role_id: int | None) -> str:
     return role.mention if role else f"(gelöscht: {role_id})"
 
 
+# ---- Verifizierung: geteilte Logik zwischen `/setup verifizierung` und dem Klick-Panel ----
+
+
+def verification_preview_embed(
+    guild: discord.Guild, regel_kanal: discord.TextChannel, rolle: discord.Role | None
+) -> discord.Embed:
+    affected = sum(1 for m in guild.members if not m.bot and (not rolle or rolle not in m.roles))
+    e = discord.Embed(title="🔒 Verifizierung einrichten?", colour=discord.Colour.orange())
+    e.add_field(name="Regel-Kanal", value=regel_kanal.mention, inline=False)
+    e.add_field(name="Rolle", value=rolle.mention if rolle else "neu: „Verifiziert“", inline=False)
+    e.add_field(
+        name="Was passiert",
+        value=(f"• @everyone verliert „Kanäle ansehen“ serverweit\n"
+               f"• {regel_kanal.mention} bleibt für alle sichtbar\n"
+               f"• Die Verifiziert-Rolle bekommt „Kanäle ansehen“ automatisch zurück\n"
+               f"• {affected} bestehende Mitglieder bekommen die Rolle sofort, damit niemand ausgesperrt wird\n"
+               f"• Die Autorolle (falls gesetzt, z. B. „Neuling“) bekommen neue Mitglieder weiterhin sofort "
+               "beim Beitritt, unabhängig von der Verifizierung"),
+        inline=False,
+    )
+    return e
+
+
+async def apply_verification(
+    db, guild: discord.Guild, regel_kanal: discord.TextChannel, rolle: discord.Role | None,
+    text: str | None, requested_by,
+) -> discord.Role:
+    me = guild.me
+    if not (me.guild_permissions.manage_roles and me.guild_permissions.manage_channels):
+        raise UserError("Mir fehlen die Rechte „Rollen verwalten“ und „Kanäle verwalten“.")
+    if rolle and (rolle.managed or rolle >= me.top_role):
+        raise UserError(f"{rolle.mention} kann ich nicht vergeben. Meine Rolle muss in den "
+                        "Servereinstellungen über ihr stehen.")
+
+    if rolle is None:
+        rolle = await guild.create_role(name="Verifiziert", reason=f"Verifizierung durch {requested_by}")
+    role_perms = rolle.permissions
+    role_perms.update(view_channel=True)
+    await rolle.edit(permissions=role_perms, reason="Verifizierung eingerichtet")
+
+    for member in guild.members:
+        if not member.bot and rolle not in member.roles:
+            try:
+                await member.add_roles(rolle, reason="Verifizierung eingerichtet – Bestandsmitglied")
+            except discord.HTTPException as ex:
+                log.warning("Verifizierung Bestandsrolle %s: %r", member.id, ex)
+
+    await regel_kanal.set_permissions(
+        guild.default_role, view_channel=True, reason="Verifizierung: Regel-Kanal bleibt sichtbar"
+    )
+    everyone_perms = guild.default_role.permissions
+    everyone_perms.update(view_channel=False)
+    await guild.default_role.edit(permissions=everyone_perms, reason=f"Verifizierung durch {requested_by}")
+
+    await db.set(guild.id, "verify_role", rolle.id)
+    await db.set(guild.id, "verify_channel", regel_kanal.id)
+    await db.set(guild.id, "verify_active", True)
+
+    panel_embed = discord.Embed(
+        title="📜 Regeln", description=(text or DEFAULT_VERIFY_TEXT).replace("\\n", "\n"),
+        colour=discord.Colour.blurple(),
+    )
+    panel_message = await regel_kanal.send(embed=panel_embed, view=VerifyPanelView())
+    await db.set(guild.id, "verify_message", panel_message.id)
+    return rolle
+
+
+async def turn_off_verification(db, guild: discord.Guild, requested_by) -> None:
+    everyone_perms = guild.default_role.permissions
+    everyone_perms.update(view_channel=True)
+    await guild.default_role.edit(permissions=everyone_perms, reason=f"Verifizierung aus durch {requested_by}")
+    await db.set(guild.id, "verify_active", False)
+
+
 # ---- Panel: Einstellungen per Klick statt Slash-Befehl mit Text-Parametern ----------------
 
 
@@ -347,6 +421,311 @@ class AntispamView(discord.ui.View):
         await interaction.response.edit_message(embed=self.panel.embed(), view=AntispamView(self.panel))
 
 
+class WarnThresholdModal(discord.ui.Modal, title="Verwarnungs-Schwelle"):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__()
+        self.panel = panel
+        current = panel.cog.db.get_int(panel.guild.id, "warn_threshold") or 0
+        self.schwelle = discord.ui.TextInput(label="Schwelle (0 = aus)", default=str(current), max_length=3)
+        self.add_item(self.schwelle)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = str(self.schwelle.value).strip()
+        if not raw.isdigit() or not (0 <= int(raw) <= 100):
+            return await interaction.response.send_message("Bitte eine Zahl von 0 bis 100 eingeben.", ephemeral=True)
+        value = int(raw)
+        db = self.panel.cog.db
+        if value == 0:
+            await db.set(interaction.guild_id, "warn_threshold", None)
+            await db.set(interaction.guild_id, "warn_action", None)
+        else:
+            await db.set(interaction.guild_id, "warn_threshold", value)
+            if not db.get(interaction.guild_id, "warn_action"):
+                await db.set(interaction.guild_id, "warn_action", "timeout")
+        await interaction.response.edit_message(embed=self.panel.embed(), view=WarnView(self.panel))
+
+
+class WarnThresholdButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Schwelle ändern", emoji="🔢", style=discord.ButtonStyle.secondary, row=0,
+                         custom_id="setup:warn_threshold_btn")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(WarnThresholdModal(self.panel))
+
+
+class WarnActionButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel", action: str, label: str):
+        current = panel.cog.db.get(panel.guild.id, "warn_action")
+        super().__init__(
+            label=label, style=discord.ButtonStyle.success if current == action else discord.ButtonStyle.secondary,
+            row=1, custom_id=f"setup:warn_action:{action}",
+        )
+        self.panel = panel
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction):
+        db = self.panel.cog.db
+        threshold = db.get_int(interaction.guild_id, "warn_threshold") or 3
+        await db.set(interaction.guild_id, "warn_threshold", threshold)
+        await db.set(interaction.guild_id, "warn_action", self.action)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=WarnView(self.panel))
+
+
+class WarnOffButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Automatische Strafe aus", emoji="🚫", style=discord.ButtonStyle.danger, row=2,
+                         custom_id="setup:warn_off")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        db = self.panel.cog.db
+        await db.set(interaction.guild_id, "warn_threshold", None)
+        await db.set(interaction.guild_id, "warn_action", None)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=WarnView(self.panel))
+
+
+class WarnView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(WarnThresholdButton(panel))
+        self.add_item(WarnActionButton(panel, "timeout", "Timeout (1 Std.)"))
+        self.add_item(WarnActionButton(panel, "kick", "Kick"))
+        self.add_item(WarnActionButton(panel, "ban", "Ban"))
+        self.add_item(WarnOffButton(panel))
+        self.add_item(BackButton(panel))
+
+
+class DashboardRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Rolle mit Dashboard-Zugriff wählen …", row=0,
+                         custom_id="setup:select:dashboard_role")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.panel.cog.db.set(interaction.guild_id, "dashboard_admin_role", self.values[0].id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
+
+class DashboardRoleView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(DashboardRoleSelect(panel))
+        self.add_item(ClearButton("Nur „Server verwalten“", "dashboard_admin_role", panel))
+        self.add_item(BackButton(panel))
+
+
+class BumpChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Kanal wählen, in dem ihr /bump bei Disboard nutzt …",
+                         channel_types=[discord.ChannelType.text], row=0, custom_id="setup:select:bump_channel")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        await self.panel.cog.db.set(interaction.guild_id, "bump_channel", channel.id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=BumpView(self.panel))
+
+
+class BumpRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Rolle für die Erinnerung wählen … (optional)", row=1,
+                         custom_id="setup:select:bump_role")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.panel.cog.db.set(interaction.guild_id, "bump_role", self.values[0].id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=BumpView(self.panel))
+
+
+class BumpView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(BumpChannelSelect(panel))
+        self.add_item(BumpRoleSelect(panel))
+        self.add_item(ClearButton("Bump-Kanal aus", "bump_channel", panel, row=2))
+        self.add_item(ClearButton("Bump-Rolle aus", "bump_role", panel, row=2))
+        self.add_item(BackButton(panel))
+
+
+class MemberCountChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Sprachkanal wählen, der die Mitgliederzahl im Namen zeigt …",
+                         channel_types=[discord.ChannelType.voice], row=0,
+                         custom_id="setup:select:member_count_channel")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        if hasattr(channel, "permissions_for") and not channel.permissions_for(interaction.guild.me).manage_channels:
+            return await interaction.response.send_message("Mir fehlt das Recht „Kanäle verwalten“.", ephemeral=True)
+        await self.panel.cog.db.set(interaction.guild_id, "member_count_channel", channel.id)
+        stats_cog = self.panel.cog.bot.get_cog("Stats")
+        if stats_cog:
+            await stats_cog.update_guild(interaction.guild)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
+
+class MemberCountView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(MemberCountChannelSelect(panel))
+        self.add_item(ClearButton("Mitglieder-Zähler aus", "member_count_channel", panel))
+        self.add_item(BackButton(panel))
+
+
+class VerifySetupChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Regel-Kanal wählen …", channel_types=[discord.ChannelType.text], row=0,
+                         custom_id="setup:select:verify_setup_channel")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        await interaction.response.edit_message(view=VerifySetupRoleView(self.panel, channel))
+
+
+class VerifySetupRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, panel: "SettingsPanel", channel: discord.TextChannel):
+        super().__init__(placeholder="Vorhandene Rolle für Verifizierte wählen …", row=0,
+                         custom_id="setup:select:verify_setup_role")
+        self.panel = panel
+        self.channel = channel
+
+    async def callback(self, interaction: discord.Interaction):
+        await start_verification_confirm(interaction, self.panel, self.channel, self.values[0])
+
+
+class VerifySetupNewRoleButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel", channel: discord.TextChannel):
+        super().__init__(label="Stattdessen neue Rolle „Verifiziert“ anlegen", style=discord.ButtonStyle.secondary,
+                         row=1, custom_id="setup:verify_setup_new_role")
+        self.panel = panel
+        self.channel = channel
+
+    async def callback(self, interaction: discord.Interaction):
+        await start_verification_confirm(interaction, self.panel, self.channel, None)
+
+
+class VerifySetupRoleView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel", channel: discord.TextChannel):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(VerifySetupRoleSelect(panel, channel))
+        self.add_item(VerifySetupNewRoleButton(panel, channel))
+        self.add_item(BackButton(panel))
+
+
+class VerifySetupStartButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Einrichten starten", emoji="🔒", style=discord.ButtonStyle.success, row=0,
+                         custom_id="setup:verify_setup_start")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        me = interaction.guild.me
+        if not (me.guild_permissions.manage_roles and me.guild_permissions.manage_channels):
+            return await interaction.response.send_message(
+                "Mir fehlen die Rechte „Rollen verwalten“ und „Kanäle verwalten“.", ephemeral=True,
+            )
+        view = discord.ui.View(timeout=None if self.panel.persistent else 180)
+        view.add_item(VerifySetupChannelSelect(self.panel))
+        view.add_item(BackButton(self.panel))
+        await interaction.response.edit_message(view=view)
+
+
+async def start_verification_confirm(
+    interaction: discord.Interaction, panel: "SettingsPanel", channel: discord.TextChannel, rolle: discord.Role | None
+) -> None:
+    if rolle and (rolle.managed or rolle >= interaction.guild.me.top_role):
+        return await interaction.response.send_message(
+            f"{rolle.mention} kann ich nicht vergeben. Meine Rolle muss in den Servereinstellungen über ihr stehen.",
+            ephemeral=True,
+        )
+    e = verification_preview_embed(interaction.guild, channel, rolle)
+    confirm = Confirm(interaction.user.id, "Einrichten")
+    await interaction.response.edit_message(embed=e, view=confirm)
+    await confirm.wait()
+    if not confirm.confirmed:
+        return
+    await apply_verification(panel.cog.db, interaction.guild, channel, rolle, None, interaction.user)
+    await interaction.edit_original_response(
+        content=f"✅ Verifizierung eingerichtet. Panel steht in {channel.mention}.",
+        embed=panel.embed(), view=panel,
+    )
+
+
+class VerifyTextModal(discord.ui.Modal, title="Regeln-Text"):
+    def __init__(self, panel: "SettingsPanel", current: str):
+        super().__init__()
+        self.panel = panel
+        self.text = discord.ui.TextInput(
+            label="Regeln-Text", style=discord.TextStyle.paragraph, default=current, max_length=1000,
+        )
+        self.add_item(self.text)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        db = self.panel.cog.db
+        channel_id = db.get_int(interaction.guild_id, "verify_channel")
+        message_id = db.get_int(interaction.guild_id, "verify_message")
+        channel = interaction.guild.get_channel(channel_id) if channel_id else None
+        if not channel or not message_id:
+            return await interaction.response.send_message("Verifizierung ist nicht mehr eingerichtet.", ephemeral=True)
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            return await interaction.response.send_message(
+                "Das Regeln-Panel wurde gelöscht. Einmal neu einrichten.", ephemeral=True
+            )
+        embed = message.embeds[0] if message.embeds else discord.Embed(title="📜 Regeln", colour=discord.Colour.blurple())
+        embed.description = str(self.text.value).replace("\\n", "\n")
+        await message.edit(embed=embed)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=VerifyView(self.panel))
+
+
+class VerifyTextButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Text ändern", emoji="✏️", style=discord.ButtonStyle.secondary, row=0,
+                         custom_id="setup:verify_text_btn")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        db = self.panel.cog.db
+        channel_id = db.get_int(interaction.guild_id, "verify_channel")
+        message_id = db.get_int(interaction.guild_id, "verify_message")
+        current = DEFAULT_VERIFY_TEXT
+        channel = interaction.guild.get_channel(channel_id) if channel_id else None
+        if channel and message_id:
+            try:
+                message = await channel.fetch_message(message_id)
+                if message.embeds and message.embeds[0].description:
+                    current = message.embeds[0].description
+            except discord.NotFound:
+                pass
+        await interaction.response.send_modal(VerifyTextModal(self.panel, current))
+
+
+class VerifyOffButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Ausschalten", emoji="🔓", style=discord.ButtonStyle.danger, row=0,
+                         custom_id="setup:verify_off")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await turn_off_verification(self.panel.cog.db, interaction.guild, interaction.user)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=VerifyView(self.panel))
+
+
+class VerifyView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(VerifyTextButton(panel) if panel.cog.db.get_bool(panel.guild.id, "verify_active")
+                     else VerifySetupStartButton(panel))
+        if panel.cog.db.get_bool(panel.guild.id, "verify_active"):
+            self.add_item(VerifyOffButton(panel))
+        self.add_item(BackButton(panel))
+
+
 class SettingsPanel(discord.ui.View):
     """Hauptmenü. `persistent=True`: fest in einem Kanal gepostet, überlebt Neustarts (siehe
     `Setup.register_persistent_views`); sonst normale ephemere Antwort auf `/setup panel`."""
@@ -422,6 +801,31 @@ class SettingsPanel(discord.ui.View):
     async def tickets(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=TicketTeamRoleView(self))
 
+    @discord.ui.button(label="Verwarnungen", emoji="⚠️", style=discord.ButtonStyle.secondary, row=3,
+                       custom_id="setup:open:warn")
+    async def warn_settings(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=WarnView(self))
+
+    @discord.ui.button(label="Dashboard", emoji="🖥️", style=discord.ButtonStyle.secondary, row=3,
+                       custom_id="setup:open:dashboard_role")
+    async def dashboard_role(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=DashboardRoleView(self))
+
+    @discord.ui.button(label="Verifizierung", emoji="🔒", style=discord.ButtonStyle.secondary, row=3,
+                       custom_id="setup:open:verify")
+    async def verify(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=VerifyView(self))
+
+    @discord.ui.button(label="Bump-Erinnerung", emoji="📈", style=discord.ButtonStyle.secondary, row=3,
+                       custom_id="setup:open:bump")
+    async def bump(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=BumpView(self))
+
+    @discord.ui.button(label="Mitglieder-Zähler", emoji="👥", style=discord.ButtonStyle.secondary, row=3,
+                       custom_id="setup:open:member_count")
+    async def member_count(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=MemberCountView(self))
+
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
 
@@ -457,6 +861,18 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="AION-2-Duplikatfilter", value=fmt_channel(guild, db.get_int(guild.id, "aion_channel")))
         ticket_roles = [fmt_role(guild, i) for i in db.get_ids(guild.id, "ticket_team_roles")]
         e.add_field(name="Ticket-Team-Rollen", value=", ".join(ticket_roles) if ticket_roles else "–")
+        schwelle = db.get_int(guild.id, "warn_threshold")
+        aktion = db.get(guild.id, "warn_action")
+        e.add_field(name="Automatische Strafe", value=f"ab {schwelle} Verwarnungen: {aktion}" if schwelle else "aus")
+        dashboard_role = db.get_int(guild.id, "dashboard_admin_role")
+        e.add_field(name="Dashboard-Zugriff", value=fmt_role(guild, dashboard_role) if dashboard_role else "nur „Server verwalten“")
+        verify_active = db.get_bool(guild.id, "verify_active")
+        e.add_field(name="Verifizierung",
+                    value=f"an – {fmt_channel(guild, db.get_int(guild.id, 'verify_channel'))}" if verify_active else "aus")
+        bump_channel = db.get_int(guild.id, "bump_channel")
+        e.add_field(name="Bump-Erinnerung", value=fmt_channel(guild, bump_channel) if bump_channel else "aus")
+        member_count_channel = db.get_int(guild.id, "member_count_channel")
+        e.add_field(name="Mitglieder-Zähler", value=fmt_channel(guild, member_count_channel) if member_count_channel else "aus")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -645,10 +1061,7 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         if aus:
             if not self.db.get_bool(guild.id, "verify_active"):
                 return await interaction.response.send_message("Verifizierung ist schon aus.", ephemeral=True)
-            everyone_perms = guild.default_role.permissions
-            everyone_perms.update(view_channel=True)
-            await guild.default_role.edit(permissions=everyone_perms, reason=f"Verifizierung aus durch {interaction.user}")
-            await self.db.set(guild.id, "verify_active", False)
+            await turn_off_verification(self.db, guild, interaction.user)
             return await interaction.response.send_message(
                 "Verifizierung ist aus, alle sehen den Server wieder wie vorher. Die Rolle selbst habe ich "
                 "nicht gelöscht, das kannst du bei Bedarf in den Servereinstellungen tun.", ephemeral=True,
@@ -662,56 +1075,14 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
             raise UserError(f"{rolle.mention} kann ich nicht vergeben. Meine Rolle muss in den "
                             "Servereinstellungen über ihr stehen.")
 
-        affected = sum(1 for m in guild.members if not m.bot and (not rolle or rolle not in m.roles))
-        e = discord.Embed(title="🔒 Verifizierung einrichten?", colour=discord.Colour.orange())
-        e.add_field(name="Regel-Kanal", value=regel_kanal.mention, inline=False)
-        e.add_field(name="Rolle", value=rolle.mention if rolle else "neu: „Verifiziert“", inline=False)
-        e.add_field(
-            name="Was passiert",
-            value=(f"• @everyone verliert „Kanäle ansehen“ serverweit\n"
-                   f"• {regel_kanal.mention} bleibt für alle sichtbar\n"
-                   f"• Die Verifiziert-Rolle bekommt „Kanäle ansehen“ automatisch zurück\n"
-                   f"• {affected} bestehende Mitglieder bekommen die Rolle sofort, damit niemand ausgesperrt wird\n"
-                   f"• Die Autorolle (falls gesetzt, z. B. „Neuling“) bekommen neue Mitglieder weiterhin sofort "
-                   "beim Beitritt, unabhängig von der Verifizierung"),
-            inline=False,
-        )
+        e = verification_preview_embed(guild, regel_kanal, rolle)
         view = Confirm(interaction.user.id, "Einrichten")
         await interaction.response.send_message(embed=e, view=view, ephemeral=True)
         await view.wait()
         if not view.confirmed:
             return
 
-        if rolle is None:
-            rolle = await guild.create_role(name="Verifiziert", reason=f"Verifizierung durch {interaction.user}")
-        role_perms = rolle.permissions
-        role_perms.update(view_channel=True)
-        await rolle.edit(permissions=role_perms, reason="Verifizierung eingerichtet")
-
-        for member in guild.members:
-            if not member.bot and rolle not in member.roles:
-                try:
-                    await member.add_roles(rolle, reason="Verifizierung eingerichtet – Bestandsmitglied")
-                except discord.HTTPException as ex:
-                    log.warning("Verifizierung Bestandsrolle %s: %r", member.id, ex)
-
-        await regel_kanal.set_permissions(
-            guild.default_role, view_channel=True, reason="Verifizierung: Regel-Kanal bleibt sichtbar"
-        )
-        everyone_perms = guild.default_role.permissions
-        everyone_perms.update(view_channel=False)
-        await guild.default_role.edit(permissions=everyone_perms, reason=f"Verifizierung durch {interaction.user}")
-
-        await self.db.set(guild.id, "verify_role", rolle.id)
-        await self.db.set(guild.id, "verify_channel", regel_kanal.id)
-        await self.db.set(guild.id, "verify_active", True)
-
-        panel_embed = discord.Embed(
-            title="📜 Regeln", description=(text or DEFAULT_VERIFY_TEXT).replace("\\n", "\n"),
-            colour=discord.Colour.blurple(),
-        )
-        panel_message = await regel_kanal.send(embed=panel_embed, view=VerifyPanelView())
-        await self.db.set(guild.id, "verify_message", panel_message.id)
+        await apply_verification(self.db, guild, regel_kanal, rolle, text, interaction.user)
         await interaction.edit_original_response(
             content=f"✅ Verifizierung eingerichtet. Panel steht in {regel_kanal.mention}.", embed=None, view=None
         )
@@ -740,6 +1111,47 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         await interaction.response.send_message(
             f"Gruppen-DPS geht jetzt nach {kanal.mention}.\n\nURL für die DeckBar-Einstellungen:\n"
             f"`{webhook_url(token)}`\n\nGeheim halten — wer die URL hat, kann hier posten.", ephemeral=True,
+        )
+
+    @app_commands.command(name="bump", description="Erinnerung, wenn der Disboard-Server-Bump wieder möglich ist (alle 2 Std.)")
+    @app_commands.describe(
+        kanal="Kanal, in dem ihr /bump bei Disboard nutzt (dort kommt auch die Erinnerung)",
+        rolle="Rolle, die bei der Erinnerung gepingt wird (leer lassen = keine)",
+        aus="Erinnerung abschalten",
+    )
+    async def bump_settings(
+        self, interaction: discord.Interaction, kanal: discord.TextChannel | None = None,
+        rolle: discord.Role | None = None, aus: bool = False,
+    ):
+        if aus:
+            await self.db.set(interaction.guild_id, "bump_channel", None)
+            return await interaction.response.send_message("Bump-Erinnerung ist aus.", ephemeral=True)
+        if kanal:
+            await self.db.set(interaction.guild_id, "bump_channel", kanal.id)
+        if rolle:
+            await self.db.set(interaction.guild_id, "bump_role", rolle.id)
+        channel_id = self.db.get_int(interaction.guild_id, "bump_channel")
+        if not channel_id:
+            raise UserError("Gib einen Kanal an (`kanal:`).")
+        channel = interaction.guild.get_channel(channel_id)
+        rolle = interaction.guild.get_role(self.db.get_int(interaction.guild_id, "bump_role") or 0)
+        await interaction.response.send_message(
+            f"Bump-Erinnerung aktiv für {channel.mention}" + (f", pingt {rolle.mention}" if rolle else "") + ".",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="mitglieder-zaehler", description="Sprachkanal, dessen Name die Mitgliederzahl zeigt")
+    @app_commands.describe(kanal="Vorhandener Sprachkanal (Name wird z. B. zu „👥 Mitglieder: 123“); leer lassen = aus")
+    async def member_count_settings(self, interaction: discord.Interaction, kanal: discord.VoiceChannel | None = None):
+        if kanal and not kanal.permissions_for(interaction.guild.me).manage_channels:
+            return await interaction.response.send_message("Mir fehlt das Recht „Kanäle verwalten“.", ephemeral=True)
+        await self.db.set(interaction.guild_id, "member_count_channel", kanal and kanal.id)
+        if kanal:
+            stats_cog = self.bot.get_cog("Stats")
+            if stats_cog:
+                await stats_cog.update_guild(interaction.guild)
+        await interaction.response.send_message(
+            f"{kanal.mention} zeigt jetzt die Mitgliederzahl." if kanal else "Mitglieder-Zähler ist aus.", ephemeral=True
         )
 
     @commands.Cog.listener()

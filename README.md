@@ -23,9 +23,14 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Web-Dashboard** | `/setup dashboard rolle:`, dann `http://<DASHBOARD_HOST>:8789` | Einstellungen im Browser mit Discord-Login, nur für die freigeschaltete Rolle. Siehe „Web-Dashboard einrichten" unten. |
 | **AION-2** | `/aion kanal:`, `/aion token:True` | Mehrere DeckBar-Posts vom selben Dungeon-Lauf zu einem zusammenführen — per Duplikatfilter (ohne DeckBar-Änderung) oder per API mit Rangliste (braucht DeckBar-Änderung). Siehe „AION-2: mehrere DeckBar-Posts zu einem zusammenführen" unten. |
 | **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
+| **Bump-Erinnerung** | `/setup bump kanal: rolle:`, auch im Klick-Panel | Erkennt die Bump-Bestätigung von [DISBOARD](https://disboard.org) im festgelegten Kanal und erinnert nach Ablauf des 2-Stunden-Cooldowns per Ping (optionale Rolle) daran, `/bump` erneut zu tippen. Rein passiv, der Bot bumpt nicht selbst. |
+| **Mitglieder-Zähler** | `/setup mitglieder-zaehler kanal:`, auch im Klick-Panel | Name eines Sprachkanals zeigt laufend die aktuelle Mitgliederzahl (z. B. „👥 Mitglieder: 123“), aktualisiert bei Beitritt/Austritt und mindestens alle 10 Minuten (Discords Limit für Kanal-Umbenennungen). |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
-Auswahl per Dropdown, Text per Formular, Ein/Aus per Knopf — kein Befehl tippen nötig).
+Auswahl per Dropdown, Text per Formular, Ein/Aus per Knopf — kein Befehl tippen nötig). Das
+Klick-Panel deckt inzwischen **alle** `/setup`-Einstellungen ab, inklusive Verwarnungs-Schwelle,
+Web-Dashboard-Rolle und der kompletten Verifizierungs-Ersteinrichtung (mit Vorschau/Bestätigung
+wie beim Befehl).
 `/setup management-kanal kategorie:` legt einen festen Kanal mit genau diesem Klick-Panel an (z. B.
 unter einer internen Admin-Kategorie) — bleibt dauerhaft da und funktioniert auch nach einem
 Neustart des Bots weiter. Die `/setup`- und `/aufraeumen`-Befehle sehen nur Leute mit
