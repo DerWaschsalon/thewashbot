@@ -27,7 +27,7 @@ def test_all_commands_register():
             # "exception was never retrieved".
             for cog_name, loop_name in [
                 ("Reminders", "check_due"), ("Notifications", "poll_feeds"),
-                ("Bump", "check_due"), ("Stats", "refresh"),
+                ("Bump", "check_due"), ("Stats", "refresh"), ("Birthdays", "check"),
             ]:
                 loop = getattr(bot.get_cog(cog_name), loop_name)
                 task = loop.get_task()
@@ -48,6 +48,8 @@ def test_all_commands_register():
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
                      "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook", "setup dashboard", "aion",
                      "setup tickets", "ticket-panel", "setup bump", "setup mitglieder-zaehler", "setup starboard",
+                     "setup bots-zaehler", "umfrage", "geburtstag-setzen", "geburtstag-loeschen", "geburtstag",
+                     "setup geburtstage",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -120,11 +122,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 16  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 17  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 17  # inkl. Schließen
+    assert len(ephemeral.children) == 18  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -549,11 +551,13 @@ def test_bump_reminder_sends_role_mention():
     run(go())
 
 
-def test_member_count_channel_name():
-    from bot.cogs.stats import channel_name
+def test_stats_channel_names():
+    from bot.cogs.stats import bots_channel_name, member_channel_name
 
-    guild = type("G", (), {"member_count": 123})()
-    assert channel_name(guild) == "👥 Mitglieder: 123"
+    bots = [type("M", (), {"bot": True})(), type("M", (), {"bot": True})(), type("M", (), {"bot": False})()]
+    guild = type("G", (), {"member_count": 123, "members": bots})()
+    assert member_channel_name(guild) == "👥 Mitglieder: 123"
+    assert bots_channel_name(guild) == "🤖 Bots: 2"
 
 
 def test_new_panel_subviews_build_without_overflow():
@@ -562,7 +566,7 @@ def test_new_panel_subviews_build_without_overflow():
     from pathlib import Path
 
     from bot.cogs.settings import (
-        BumpView, DashboardRoleView, MemberCountView, SettingsPanel, StarboardView, WarnView, VerifyView,
+        BirthdayView, BumpView, DashboardRoleView, MemberCountView, SettingsPanel, StarboardView, WarnView, VerifyView,
     )
     from bot.db import Database
 
@@ -572,7 +576,7 @@ def test_new_panel_subviews_build_without_overflow():
     panel = SettingsPanel.__new__(SettingsPanel)
     panel.cog, panel.guild, panel.persistent = cog, guild, True
 
-    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView, StarboardView]:
+    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView, StarboardView, BirthdayView]:
         view = view_cls(panel)
         assert all(item.custom_id for item in view.children)
 
@@ -711,3 +715,28 @@ def test_starboard_sync_respects_threshold_and_persists_post():
             await db.close()
 
     run(go())
+
+
+def test_poll_answer_parsing():
+    import pytest as _pytest
+
+    from bot.cogs.polls import parse_answers
+    from bot.errors import UserError
+
+    assert parse_answers("Ja | Nein") == ["Ja", "Nein"]
+    assert parse_answers(" A | B | C ") == ["A", "B", "C"]
+
+    with _pytest.raises(UserError):
+        parse_answers("Nur eine Antwort")  # weniger als 2
+    with _pytest.raises(UserError):
+        parse_answers("|".join(f"A{i}" for i in range(11)))  # mehr als 10
+    with _pytest.raises(UserError):
+        parse_answers("x" * 56 + "|Nein")  # einzelne Antwort zu lang
+
+
+def test_birthday_day_in_month_validation():
+    from bot.cogs.birthdays import DAYS_IN_MONTH
+
+    assert DAYS_IN_MONTH[2] == 29  # Februar: 29 erlauben (Schaltjahr), Validierung nicht zu streng
+    assert DAYS_IN_MONTH[4] == 30
+    assert 31 <= DAYS_IN_MONTH[1]

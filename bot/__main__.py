@@ -30,6 +30,8 @@ COGS = [
     "bot.cogs.bump",
     "bot.cogs.stats",
     "bot.cogs.starboard",
+    "bot.cogs.polls",
+    "bot.cogs.birthdays",
 ]
 
 

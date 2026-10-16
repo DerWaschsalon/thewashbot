@@ -567,11 +567,31 @@ class MemberCountChannelSelect(discord.ui.ChannelSelect):
         await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
 
 
+class BotsCountChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Sprachkanal wählen, der die Bot-Anzahl im Namen zeigt …",
+                         channel_types=[discord.ChannelType.voice], row=1,
+                         custom_id="setup:select:bots_count_channel")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        if hasattr(channel, "permissions_for") and not channel.permissions_for(interaction.guild.me).manage_channels:
+            return await interaction.response.send_message("Mir fehlt das Recht „Kanäle verwalten“.", ephemeral=True)
+        await self.panel.cog.db.set(interaction.guild_id, "bots_count_channel", channel.id)
+        stats_cog = self.panel.cog.bot.get_cog("Stats")
+        if stats_cog:
+            await stats_cog.update_guild(interaction.guild)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
+
 class MemberCountView(discord.ui.View):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(timeout=None if panel.persistent else 180)
         self.add_item(MemberCountChannelSelect(panel))
-        self.add_item(ClearButton("Mitglieder-Zähler aus", "member_count_channel", panel))
+        self.add_item(BotsCountChannelSelect(panel))
+        self.add_item(ClearButton("Mitglieder-Zähler aus", "member_count_channel", panel, row=2))
+        self.add_item(ClearButton("Bots-Zähler aus", "bots_count_channel", panel, row=2))
         self.add_item(BackButton(panel))
 
 
@@ -621,6 +641,28 @@ class StarboardView(discord.ui.View):
         self.add_item(StarboardChannelSelect(panel))
         self.add_item(StarboardThresholdButton(panel))
         self.add_item(ClearButton("Starboard aus", "starboard_channel", panel, row=2))
+        self.add_item(BackButton(panel))
+
+
+class BirthdayChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Kanal für Geburtstagsgrüße wählen …", channel_types=[discord.ChannelType.text],
+                         row=0, custom_id="setup:select:birthday_channel")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        if hasattr(channel, "permissions_for") and not channel.permissions_for(interaction.guild.me).send_messages:
+            return await interaction.response.send_message(f"Ich darf in {channel.mention} nicht schreiben.", ephemeral=True)
+        await self.panel.cog.db.set(interaction.guild_id, "birthday_channel", channel.id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
+
+class BirthdayView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(BirthdayChannelSelect(panel))
+        self.add_item(ClearButton("Geburtstagsgrüße aus", "birthday_channel", panel))
         self.add_item(BackButton(panel))
 
 
@@ -870,7 +912,7 @@ class SettingsPanel(discord.ui.View):
     async def bump(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=BumpView(self))
 
-    @discord.ui.button(label="Mitglieder-Zähler", emoji="👥", style=discord.ButtonStyle.secondary, row=3,
+    @discord.ui.button(label="Statistik-Kanäle", emoji="👥", style=discord.ButtonStyle.secondary, row=3,
                        custom_id="setup:open:member_count")
     async def member_count(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=MemberCountView(self))
@@ -879,6 +921,11 @@ class SettingsPanel(discord.ui.View):
                        custom_id="setup:open:starboard")
     async def starboard(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=StarboardView(self))
+
+    @discord.ui.button(label="Geburtstage", emoji="🎂", style=discord.ButtonStyle.secondary, row=4,
+                       custom_id="setup:open:birthday")
+    async def birthday(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=BirthdayView(self))
 
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
@@ -927,10 +974,14 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="Bump-Erinnerung", value=fmt_channel(guild, bump_channel) if bump_channel else "aus")
         member_count_channel = db.get_int(guild.id, "member_count_channel")
         e.add_field(name="Mitglieder-Zähler", value=fmt_channel(guild, member_count_channel) if member_count_channel else "aus")
+        bots_count_channel = db.get_int(guild.id, "bots_count_channel")
+        e.add_field(name="Bots-Zähler", value=fmt_channel(guild, bots_count_channel) if bots_count_channel else "aus")
         starboard_channel = db.get_int(guild.id, "starboard_channel")
         starboard_threshold = db.get_int(guild.id, "starboard_threshold") or 3
         e.add_field(name="Starboard",
                     value=f"{fmt_channel(guild, starboard_channel)} (ab {starboard_threshold} ⭐)" if starboard_channel else "aus")
+        birthday_channel = db.get_int(guild.id, "birthday_channel")
+        e.add_field(name="Geburtstagsgrüße", value=fmt_channel(guild, birthday_channel) if birthday_channel else "aus")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -1212,6 +1263,20 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
             f"{kanal.mention} zeigt jetzt die Mitgliederzahl." if kanal else "Mitglieder-Zähler ist aus.", ephemeral=True
         )
 
+    @app_commands.command(name="bots-zaehler", description="Sprachkanal, dessen Name die Bot-Anzahl zeigt")
+    @app_commands.describe(kanal="Vorhandener Sprachkanal (Name wird z. B. zu „🤖 Bots: 12“); leer lassen = aus")
+    async def bots_count_settings(self, interaction: discord.Interaction, kanal: discord.VoiceChannel | None = None):
+        if kanal and not kanal.permissions_for(interaction.guild.me).manage_channels:
+            return await interaction.response.send_message("Mir fehlt das Recht „Kanäle verwalten“.", ephemeral=True)
+        await self.db.set(interaction.guild_id, "bots_count_channel", kanal and kanal.id)
+        if kanal:
+            stats_cog = self.bot.get_cog("Stats")
+            if stats_cog:
+                await stats_cog.update_guild(interaction.guild)
+        await interaction.response.send_message(
+            f"{kanal.mention} zeigt jetzt die Bot-Anzahl." if kanal else "Bots-Zähler ist aus.", ephemeral=True
+        )
+
     @app_commands.command(name="starboard", description="Nachrichten ab X ⭐-Reaktionen in einen Highlight-Kanal spiegeln")
     @app_commands.describe(
         kanal="Highlight-Kanal für gestarrte Nachrichten; leer lassen = aus",
@@ -1229,6 +1294,16 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         await interaction.response.send_message(
             f"Starboard aktiv: ab {schwelle} ⭐ landen Nachrichten in {kanal.mention}." if kanal else "Starboard ist aus.",
             ephemeral=True,
+        )
+
+    @app_commands.command(name="geburtstage", description="Kanal für die tägliche Geburtstagsgratulation (9 Uhr)")
+    @app_commands.describe(kanal="Kanal für die Gratulation; leer lassen = aus")
+    async def birthday_settings(self, interaction: discord.Interaction, kanal: discord.TextChannel | None = None):
+        if kanal and not kanal.permissions_for(interaction.guild.me).send_messages:
+            return await interaction.response.send_message(f"Ich darf in {kanal.mention} nicht schreiben.", ephemeral=True)
+        await self.db.set(interaction.guild_id, "birthday_channel", kanal and kanal.id)
+        await interaction.response.send_message(
+            f"Geburtstagsgrüße gehen jetzt nach {kanal.mention}." if kanal else "Geburtstagsgrüße sind aus.", ephemeral=True
         )
 
     @commands.Cog.listener()
