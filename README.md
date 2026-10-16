@@ -26,6 +26,14 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Bump-Erinnerung** | `/setup bump kanal: rolle:`, auch im Klick-Panel | Erkennt die Bump-Bestätigung von [DISBOARD](https://disboard.org) im festgelegten Kanal und erinnert nach Ablauf des 2-Stunden-Cooldowns per Ping (optionale Rolle) daran, `/bump` erneut zu tippen. Rein passiv, der Bot bumpt nicht selbst. |
 | **Mitglieder-Zähler** | `/setup mitglieder-zaehler kanal:`, auch im Klick-Panel | Name eines Sprachkanals zeigt laufend die aktuelle Mitgliederzahl (z. B. „👥 Mitglieder: 123“), aktualisiert bei Beitritt/Austritt und mindestens alle 10 Minuten (Discords Limit für Kanal-Umbenennungen). |
 | **Starboard** | `/setup starboard kanal: schwelle:`, auch im Klick-Panel | Nachrichten ab X ⭐-Reaktionen (ohne die des Autors selbst, Standard 3) landen als Embed in einem Highlight-Kanal, Sterne-Zähler aktualisiert sich live, Post verschwindet wieder, wenn die Reaktionen unter die Schwelle fallen. |
+| **Bots-Zähler** | `/setup bots-zaehler kanal:`, auch im Klick-Panel | Zweiter, unabhängig einstellbarer Sprachkanal zeigt die Bot-Anzahl (z. B. „🤖 Bots: 12“). |
+| **Voice-Statistik** | `/sprachzeit`, XP per `/setup sprachzeit-xp` oder im Klick-Panel | Zeit im Sprachkanal läuft mit (nicht allein, nicht im AFK-Kanal, nicht selbst taub/stumm), optional zusätzlich XP pro Minute für ein künftiges Levelsystem. |
+| **Umfragen** | `/umfrage frage: antworten: dauer_stunden: mehrfachauswahl:` | Native Discord-Umfrage, 2–10 Antworten durch `\|` getrennt. |
+| **Geburtstage** | `/geburtstag-setzen tag: monat:`, `/geburtstag-loeschen`, `/geburtstag`, Kanal per `/setup geburtstage` oder im Klick-Panel | Tägliche Gratulation um 9 Uhr (Europe/Berlin) im eingerichteten Kanal. |
+| **Embed-Ersteller** | `/embed-erstellen kanal:` | Formular (Titel, Beschreibung, Hex-Farbe, Bild-URL), postet das fertige Embed. |
+| **Eigene Befehle** | `/befehl-erstellen name: antwort:`, `/befehl-loeschen`, `/befehle` | `!name` im Chat antwortet mit dem hinterlegten Text, Platzhalter `{user}`/`{server}`. |
+| **Zeitgesteuerte Ankündigungen** | `/ankuendigung-erstellen kanal: text: intervall_minuten:`, `/ankuendigungen`, `/ankuendigung-loeschen` | Text wird automatisch alle X Minuten in einen Kanal gepostet. |
+| **Benachrichtigungen: YouTube** | Dienst „YouTube" im Klick-Assistenten (🔔) | Neue Videos per öffentlichem RSS-Feed, ohne API-Schlüssel — braucht die Kanal-ID (beginnt mit „UC…"). |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
 Auswahl per Dropdown, Text per Formular, Ein/Aus per Knopf — kein Befehl tippen nötig). Das

@@ -83,12 +83,12 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
 
 ## Noch zu bauen (Daves Auswahl)
 
-Gewählt:
-- **Voice-Statistik**: Zeit im Sprachkanal (nicht allein, nicht AFK/taub), optional XP pro Minute.
+Noch offen, braucht eine Entscheidung von Dave:
 - **Server-Status `/server`** (nur Dave, Env `OWNER_ID`): CPU/RAM/Uptime aus /proc, Plattenplatz
   der gemounteten Unraid-Pfade, Container über den Docker-Socket (optional gemountet, Hinweis: Socket
   = Root-Zugriff). Neustart eines Containers nur mit Bestätigung. **Braucht vorher eine
-  Entscheidung von Dave** (Docker-Socket mounten = Root-Zugriff für den Container).
+  Entscheidung** (Docker-Socket mounten = Root-Zugriff für den Container) — deshalb bewusst noch
+  nicht gebaut.
 
 Fertig:
 - **Starboard**: `bot/cogs/starboard.py`. `/setup starboard kanal: schwelle:` (auch im
@@ -96,21 +96,35 @@ Fertig:
   Highlight-Kanal, Zähler aktualisiert sich live über `on_raw_reaction_add/remove`, Post
   verschwindet wieder, wenn die Reaktionen unter die Schwelle fallen. Nutzt die schon vorhandene
   `starboard`-Tabelle in `db.py`.
+- **Voice-Statistik**: `bot/cogs/voicestats.py` (Details siehe unten bei „Fertig“).
 
-Fehlende MEE6-Funktionen:
+Noch offen:
 - **Levelsystem**: 15–25 XP pro Nachricht, 60 s Abklingzeit, Formel 5·l² + 50·l + 100; Rangkarte
-  (Pillow), `/rangliste`, Level-up-Nachricht, Rollen-Belohnungen, Kanäle/Rollen ohne XP, Admin-XP-Befehle
+  (Pillow), `/rangliste`, Level-up-Nachricht, Rollen-Belohnungen, Kanäle/Rollen ohne XP, Admin-XP-Befehle.
+  `bot/cogs/voicestats.py` sammelt schon XP/Sekunden in derselben `levels`-Tabelle, Message-XP und
+  Rangkarte fehlen noch.
 - **Automod erweitert**: Wortfilter, Großbuchstaben, Emoji-Spam, Link-Filter mit erlaubten Domains,
   Verstöße als automatische Verwarnung
-- **Eigene Befehle** (Präfix `!`, Platzhalter {user} {server})
-- **Zeitgesteuerte Ankündigungen** (Intervall in Minuten)
-- **Benachrichtigungen: weitere Dienste** (GitHub ist fertig, siehe oben): YouTube per RSS (ohne
-  Schlüssel), Twitch nur mit TWITCH_CLIENT_ID/SECRET — jeweils als neuer `Provider` in `bot/notify/`
-- **Statistik-Kanäle**: Mitglieder-Zähler fertig (siehe oben, `bot/cogs/stats.py`). Bots-Zähler als
-  zweiter, separat einstellbarer Kanal noch offen (gleiches Muster, `guild.get_channel`-Filter auf
-  `member.bot`).
-- **Umfragen** (native Discord-Polls), **Giveaways** (Button, Reroll), **Geburtstage** (tägl. 9 Uhr
-  Europe/Berlin), **Embed-Ersteller** (Modal)
+- **Giveaways** (Button, Reroll) — Tabellen `giveaways`/`giveaway_entries` schon in `db.py`
+- **Benachrichtigungen: Twitch** — braucht `TWITCH_CLIENT_ID`/`SECRET` (Daves Entscheidung), als
+  neuer `Provider` in `bot/notify/` nach demselben Muster wie `youtube.py`
+
+Fertig:
+- **Eigene Befehle**: `bot/cogs/customcommands.py`. `!name` im Chat, Platzhalter `{user}`/`{server}`,
+  verwaltet über `/befehl-erstellen`, `/befehl-loeschen`, `/befehle`.
+- **Zeitgesteuerte Ankündigungen**: `bot/cogs/announcements.py`. `/ankuendigung-erstellen kanal:
+  text: intervall_minuten:`, `/ankuendigungen`, `/ankuendigung-loeschen`. Nutzt die schon
+  vorhandene `scheduled`-Tabelle.
+- **Benachrichtigungen: YouTube**: `bot/notify/youtube.py`, RSS-Feed ohne API-Schlüssel (braucht
+  die Kanal-ID, nicht Handle/URL). In `PROVIDERS` eingetragen — Discord-Seite unverändert, wie im
+  Architektur-Hinweis oben beschrieben.
+- **Statistik-Kanäle**: Mitglieder- UND Bots-Zähler fertig (`bot/cogs/stats.py`, zwei unabhängig
+  einstellbare Kanäle).
+- **Voice-Statistik**: `bot/cogs/voicestats.py`. Zeit im Sprachkanal (nicht allein, nicht AFK,
+  nicht selbst taub) läuft in `levels.voice_seconds`, optional XP/Minute. `/sprachzeit`.
+- **Umfragen** (native Discord-Polls): `bot/cogs/polls.py`, `/umfrage`.
+- **Geburtstage**: `bot/cogs/birthdays.py`, tägl. 9 Uhr Europe/Berlin.
+- **Embed-Ersteller** (Modal): `bot/cogs/embeds.py`, `/embed-erstellen`.
 
 Abhängigkeiten dafür: `pillow`, `tzdata` in requirements.txt ergänzen.
 Discord erlaubt höchstens 100 Top-Level-Slash-Befehle; neue Funktionen als Gruppen anlegen

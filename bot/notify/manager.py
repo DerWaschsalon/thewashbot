@@ -14,10 +14,11 @@ import discord
 
 from .base import Notification, Provider, ProviderError
 from .github import GitHubProvider
+from .youtube import YouTubeProvider
 
 log = logging.getLogger(__name__)
 
-PROVIDERS: dict[str, Provider] = {p.key: p for p in [GitHubProvider()]}
+PROVIDERS: dict[str, Provider] = {p.key: p for p in [GitHubProvider(), YouTubeProvider()]}
 
 
 class NotificationManager:

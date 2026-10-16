@@ -851,3 +851,78 @@ def test_voicestats_qualifies_and_format():
 
     afk_channel = FakeChannel([alice, bob], afk=True)
     assert qualifies(alice, afk_channel) is False  # AFK-Kanal zählt nie
+
+
+YOUTUBE_FEED_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+ <entry>
+  <yt:videoId>VIDEO1</yt:videoId>
+  <title>Erstes Video</title>
+  <author><name>Mein Kanal</name></author>
+  <media:group><media:thumbnail url="https://i.ytimg.com/vi/VIDEO1/hqdefault.jpg"/></media:group>
+ </entry>
+ <entry>
+  <yt:videoId>VIDEO2</yt:videoId>
+  <title>Zweites, neueres Video</title>
+  <author><name>Mein Kanal</name></author>
+  <media:group><media:thumbnail url="https://i.ytimg.com/vi/VIDEO2/hqdefault.jpg"/></media:group>
+ </entry>
+</feed>"""
+
+
+def test_youtube_feed_parsing():
+    from bot.notify.youtube import parse_feed
+
+    videos = parse_feed(YOUTUBE_FEED_XML)
+    assert [v["id"] for v in videos] == ["VIDEO1", "VIDEO2"]
+    assert videos[0]["title"] == "Erstes Video"
+    assert videos[0]["author"] == "Mein Kanal"
+    assert videos[0]["thumbnail"] == "https://i.ytimg.com/vi/VIDEO1/hqdefault.jpg"
+
+
+def test_youtube_provider_dedup_and_baseline():
+    from bot.notify.youtube import YouTubeProvider
+
+    provider = YouTubeProvider()
+    feed_xml = [YOUTUBE_FEED_XML]
+
+    async def fake_fetch(channel_id):
+        from bot.notify.youtube import parse_feed
+        return parse_feed(feed_xml[0])
+
+    provider._fetch = fake_fetch  # keine echten HTTP-Aufrufe in Tests
+
+    async def go():
+        # Baseline: registriert beide Videos, meldet aber nichts
+        notes, state = await provider.poll("UCabc", ["video"], {}, {}, baseline=True)
+        assert notes == []
+        assert set(state["seen"]) == {"VIDEO1", "VIDEO2"}
+
+        # Gleicher Feed, kein baseline mehr -> nichts Neues
+        notes2, state2 = await provider.poll("UCabc", ["video"], {}, state, baseline=False)
+        assert notes2 == []
+
+        # Ein drittes, neues Video im Feed -> genau eine Meldung
+        feed_xml[0] = YOUTUBE_FEED_XML.replace(
+            "</feed>", '<entry><yt:videoId>VIDEO3</yt:videoId><title>Drittes</title>'
+                       '<author><name>Mein Kanal</name></author></entry></feed>'
+        )
+        notes3, state3 = await provider.poll("UCabc", ["video"], {}, state2, baseline=False)
+        assert len(notes3) == 1 and notes3[0].event == "video"
+        assert "VIDEO3" in state3["seen"]
+
+    run(go())
+
+
+def test_youtube_validate_source_rejects_non_channel_ids():
+    from bot.notify.youtube import YouTubeProvider
+    from bot.notify.base import ProviderError
+
+    provider = YouTubeProvider()
+
+    async def go():
+        with pytest.raises(ProviderError):
+            await provider.validate_source("@nicht-die-kanal-id")
+
+    run(go())
