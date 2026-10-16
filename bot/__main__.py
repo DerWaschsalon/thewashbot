@@ -32,6 +32,9 @@ COGS = [
     "bot.cogs.starboard",
     "bot.cogs.polls",
     "bot.cogs.birthdays",
+    "bot.cogs.embeds",
+    "bot.cogs.customcommands",
+    "bot.cogs.announcements",
 ]
 
 
