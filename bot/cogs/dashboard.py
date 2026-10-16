@@ -105,6 +105,7 @@ body {
   color: var(--text);
   font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   min-height: 100vh;
+  overflow-x: hidden; /* Sicherheitsnetz gegen seitliches Scrollen auf schmalen Bildschirmen */
 }
 h1, h2 { margin: 0; font-weight: 600; }
 h1 { font-size: 20px; letter-spacing: 0.2px; margin-bottom: 18px; }
@@ -113,18 +114,20 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: v
 label { display: block; margin: 14px 0 5px; font-size: 13px; font-weight: 500; color: var(--dim); }
 select, input[type=text], input[type=number], textarea {
   width: 100%; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--line);
-  border-radius: 9px; padding: 8px 10px; font: inherit; color: inherit; outline: none;
+  border-radius: 9px; padding: 10px 12px; font: inherit; font-size: 16px; color: inherit; outline: none;
+  /* 16px verhindert, dass iOS Safari beim Fokussieren automatisch hineinzoomt */
 }
 select:focus, input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(90, 200, 250, 0.18); }
 textarea { min-height: 90px; font-family: inherit; resize: vertical; }
-input[type=checkbox] { width: auto; margin-right: 6px; accent-color: var(--accent); }
+input[type=checkbox] { width: auto; height: 18px; margin-right: 6px; accent-color: var(--accent); flex-shrink: 0; }
 
 .hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
 .hint code { white-space: normal; }
 
 button {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px;
-  padding: 8px 16px; font: inherit; font-weight: 500; cursor: pointer; margin-top: 16px;
+  padding: 10px 18px; min-height: 40px; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+  margin-top: 16px; touch-action: manipulation;
 }
 button:hover { background: rgba(255, 255, 255, 0.14); }
 button[type=submit] { background: var(--accent); border-color: transparent; color: #04121a; font-weight: 600; }
@@ -135,18 +138,26 @@ button.secondary { background: transparent; }
 button.cell-btn { background: none; border: none; padding: 2px; margin: 0; font-size: 1.1rem; cursor: pointer; line-height: 1; }
 
 .top {
-  display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 14px; padding: 12px 24px; border-bottom: 1px solid var(--line);
   background: rgba(10, 12, 24, 0.6); position: sticky; top: 0; z-index: 5; backdrop-filter: blur(14px);
   flex-wrap: wrap;
 }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; white-space: nowrap; }
 .logo { width: 26px; height: 12px; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8f7cff);
         box-shadow: 0 0 14px rgba(90, 200, 250, 0.5); flex-shrink: 0; }
-nav { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
-nav a { color: var(--dim); text-decoration: none; padding: 6px 12px; border-radius: 9px; font-size: 13px; }
+nav {
+  display: flex; gap: 2px; flex: 1 1 100%; order: 3;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+nav::-webkit-scrollbar { display: none; }
+nav a {
+  color: var(--dim); text-decoration: none; padding: 9px 13px; border-radius: 9px; font-size: 13px;
+  white-space: nowrap; flex-shrink: 0;
+}
 nav a.active, nav a:hover { background: var(--panel-2); color: var(--text); }
-.user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); white-space: nowrap; }
-.user a { color: var(--dim); text-decoration: none; }
+.user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); white-space: nowrap;
+        margin-left: auto; order: 2; }
+.user a { color: var(--dim); text-decoration: none; padding: 4px 2px; }
 .user a:hover { color: var(--text); }
 
 main { padding: 20px 24px 60px; max-width: 920px; margin: 0 auto; }
@@ -160,7 +171,7 @@ main { padding: 20px 24px 60px; max-width: 920px; margin: 0 auto; }
 code { background: rgba(0, 0, 0, 0.3); padding: 2px 6px; border-radius: 6px; font-size: 12px; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); word-break: break-word; }
 tr:last-child td { border-bottom: none; }
 .row-form { display: inline; }
 
@@ -182,8 +193,22 @@ table.matrix form { margin: 0; }
 @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
 
 @media (max-width: 760px) {
-  .top { padding: 12px 16px; }
-  main { padding: 14px 16px 40px; }
+  .top { padding: 10px 14px; gap: 8px; }
+  main { padding: 14px 14px 40px; }
+  .card { padding: 14px; }
+  h1 { font-size: 18px; }
+  table { font-size: 12.5px; }
+  td, th { padding: 8px 4px; }
+  button[type=submit] { width: 100%; }
+  .row-form button[type=submit] { width: auto; }  /* kleine Löschen-Buttons in Tabellenzeilen ausnehmen */
+  .checklist { gap: 10px 14px; }
+}
+
+/* Große Finger statt Mauszeiger: etwas mehr Platz, keine Hover-Zustände nötig */
+@media (hover: none) and (pointer: coarse) {
+  nav a { padding: 10px 14px; }
+  button { min-height: 44px; }
+  .checklist label { padding: 2px 0; }
 }
 """
 
