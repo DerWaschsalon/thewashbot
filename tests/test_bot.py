@@ -53,7 +53,8 @@ def test_all_commands_register():
                      "setup geburtstage", "embed-erstellen", "befehl-erstellen", "befehl-loeschen", "befehle",
                      "ankuendigung-erstellen", "ankuendigungen", "ankuendigung-loeschen",
                      "sprachzeit", "setup sprachzeit-xp", "giveaway-erstellen", "giveaway-reroll",
-                     "setup automod",
+                     "setup automod", "rang", "rangliste", "level-xp-geben", "level-belohnung",
+                     "level-kanal-ohne-xp", "level-rolle-ohne-xp", "setup level",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -126,11 +127,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 19  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 20  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 20  # inkl. Schließen
+    assert len(ephemeral.children) == 21  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -570,8 +571,8 @@ def test_new_panel_subviews_build_without_overflow():
     from pathlib import Path
 
     from bot.cogs.settings import (
-        AutomodView, BirthdayView, BumpView, DashboardRoleView, MemberCountView, SettingsPanel, StarboardView,
-        WarnView, VerifyView,
+        AutomodView, BirthdayView, BumpView, DashboardRoleView, LevelView, MemberCountView, SettingsPanel,
+        StarboardView, WarnView, VerifyView,
     )
     from bot.db import Database
 
@@ -581,7 +582,9 @@ def test_new_panel_subviews_build_without_overflow():
     panel = SettingsPanel.__new__(SettingsPanel)
     panel.cog, panel.guild, panel.persistent = cog, guild, True
 
-    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView, StarboardView, BirthdayView, AutomodView]:
+    for view_cls in [
+        WarnView, DashboardRoleView, BumpView, MemberCountView, StarboardView, BirthdayView, AutomodView, LevelView,
+    ]:
         view = view_cls(panel)
         assert all(item.custom_id for item in view.children)
 
@@ -1017,6 +1020,44 @@ def test_automod_check_detects_each_violation_independently():
             await db.close()
 
     run(go())
+
+
+def test_level_formula_and_conversion():
+    from bot.cogs.levels import level_from_xp, xp_for_level
+
+    assert xp_for_level(0) == 100  # 5*0+50*0+100
+    assert xp_for_level(1) == 155  # 5+50+100
+    assert xp_for_level(10) == 1100
+
+    assert level_from_xp(0) == (0, 0, 100)
+    assert level_from_xp(99) == (0, 99, 100)
+    assert level_from_xp(100) == (1, 0, 155)  # genau die Schwelle -> Level 1 erreicht
+    assert level_from_xp(254) == (1, 154, 155)
+    assert level_from_xp(255) == (2, 0, xp_for_level(2))
+
+    # negative XP (sollte nicht vorkommen, aber /level-xp-geben kann theoretisch überziehen) crasht nicht
+    assert level_from_xp(-50) == (0, 0, 100)
+
+
+def test_rank_card_renders_valid_png():
+    import io
+
+    from PIL import Image
+
+    from bot.cogs.rankcard import HEIGHT, WIDTH, render_rank_card
+
+    # Minimaler Fake-Avatar: ein echtes kleines PNG, damit Image.open() nicht scheitert
+    fake_avatar = io.BytesIO()
+    Image.new("RGBA", (64, 64), (10, 20, 30, 255)).save(fake_avatar, format="PNG")
+
+    buf = render_rank_card(fake_avatar.getvalue(), "TestUser", level=3, rank=1, xp_into_level=50, xp_needed=200)
+    image = Image.open(buf)
+    assert image.format == "PNG"
+    assert image.size == (WIDTH, HEIGHT)
+
+    # xp_needed=0 (Edge-Case) darf nicht durch Null teilen
+    buf2 = render_rank_card(fake_avatar.getvalue(), "TestUser", level=0, rank=1, xp_into_level=0, xp_needed=0)
+    assert Image.open(buf2).size == (WIDTH, HEIGHT)
 
 
 def test_youtube_validate_source_rejects_non_channel_ids():

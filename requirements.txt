@@ -3,3 +3,4 @@ aiosqlite>=0.20
 yt-dlp[default]
 tzdata
 aiohttp
+Pillow>=10

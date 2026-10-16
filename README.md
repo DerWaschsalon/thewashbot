@@ -35,6 +35,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Zeitgesteuerte Ankündigungen** | `/ankuendigung-erstellen kanal: text: intervall_minuten:`, `/ankuendigungen`, `/ankuendigung-loeschen` | Text wird automatisch alle X Minuten in einen Kanal gepostet. |
 | **Benachrichtigungen: YouTube** | Dienst „YouTube" im Klick-Assistenten (🔔) | Neue Videos per öffentlichem RSS-Feed, ohne API-Schlüssel — braucht die Kanal-ID (beginnt mit „UC…"). |
 | **Giveaways** | `/giveaway-erstellen kanal: preis: dauer: gewinner:`, `/giveaway-reroll` | Embed mit „🎉 Teilnehmen"-Button (An-/Abmelden), automatische Auslosung nach Ablauf, Reroll für neue Gewinner. `dauer` im selben Format wie bei `/erinnere` (z. B. `2h`, `1d2h`). |
+| **Levelsystem** | `/rang`, `/rangliste`, `/level-xp-geben`, `/level-belohnung`, `/level-kanal-ohne-xp`, `/level-rolle-ohne-xp`, an/aus per `/setup level` oder im Klick-Panel | 15–25 XP pro Nachricht (60 s Abklingzeit), Rangkarte als Bild, Level-Up-Nachricht, kumulative Rollen-Belohnungen. Standardmäßig **aus**, bis ein Server es einschaltet. |
 | **Automod erweitert** | `/setup automod`, auch im Klick-Panel | Wortfilter, Großbuchstaben-Filter, Emoji-Spam-Grenze, Link-Filter mit erlaubten Domains — jeder Verstoß zählt zusätzlich als automatische Verwarnung (zählt mit Richtung der automatischen Strafschwelle). |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-

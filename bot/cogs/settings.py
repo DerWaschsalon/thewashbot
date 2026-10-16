@@ -767,6 +767,42 @@ class AutomodView(discord.ui.View):
         await interaction.response.edit_message(embed=self.panel.embed(), view=AutomodView(self.panel))
 
 
+class LevelAnnounceChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Kanal für Level-Up-Nachrichten wählen … (leer = im selben Kanal wie die Nachricht)",
+                         channel_types=[discord.ChannelType.text], row=1, custom_id="setup:select:level_announce_channel")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        if hasattr(channel, "permissions_for") and not channel.permissions_for(interaction.guild.me).send_messages:
+            return await interaction.response.send_message(f"Ich darf in {channel.mention} nicht schreiben.", ephemeral=True)
+        await self.panel.cog.db.set(interaction.guild_id, "level_announce_channel", channel.id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=LevelView(self.panel))
+
+
+class LevelView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.panel = panel
+        active = panel.cog.db.get_bool(panel.guild.id, "level_system_enabled")
+        toggle = discord.ui.Button(
+            label=f"Levelsystem: {'an' if active else 'aus'} (klicken zum Umschalten)",
+            emoji="⭐", style=discord.ButtonStyle.success if active else discord.ButtonStyle.secondary, row=0,
+            custom_id="setup:toggle:level_system_enabled",
+        )
+        toggle.callback = self._toggle
+        self.add_item(toggle)
+        self.add_item(LevelAnnounceChannelSelect(panel))
+        self.add_item(ClearButton("Level-Up immer im Nachrichten-Kanal", "level_announce_channel", panel, row=2))
+        self.add_item(BackButton(panel))
+
+    async def _toggle(self, interaction: discord.Interaction):
+        active = self.panel.cog.db.get_bool(interaction.guild_id, "level_system_enabled")
+        await self.panel.cog.db.set(interaction.guild_id, "level_system_enabled", not active)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=LevelView(self.panel))
+
+
 class VerifySetupChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(placeholder="Regel-Kanal wählen …", channel_types=[discord.ChannelType.text], row=0,
@@ -1034,6 +1070,11 @@ class SettingsPanel(discord.ui.View):
     async def automod(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=AutomodView(self))
 
+    @discord.ui.button(label="Levelsystem", emoji="⭐", style=discord.ButtonStyle.secondary, row=4,
+                       custom_id="setup:open:level")
+    async def level(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=LevelView(self))
+
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
 
@@ -1101,6 +1142,7 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         if db.get_bool(guild.id, "automod_link_filter"):
             automod_bits.append("Link-Filter")
         e.add_field(name="Automod", value=", ".join(automod_bits) if automod_bits else "aus")
+        e.add_field(name="Levelsystem", value="an" if db.get_bool(guild.id, "level_system_enabled") else "aus")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -1457,6 +1499,22 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         if erlaubte_domains is not None:
             await self.db.set(interaction.guild_id, "automod_allowed_domains", erlaubte_domains or None)
         await interaction.response.send_message("Automod-Einstellungen aktualisiert.", ephemeral=True)
+
+    @app_commands.command(name="level", description="Levelsystem an-/ausschalten, Kanal für Level-Up-Nachrichten")
+    @app_commands.describe(
+        an="Levelsystem an- oder ausschalten; leer lassen = unverändert",
+        ankuendigungskanal="Kanal für Level-Up-Nachrichten; leer lassen = im selben Kanal wie die Nachricht",
+    )
+    async def level_settings(
+        self, interaction: discord.Interaction, an: bool | None = None,
+        ankuendigungskanal: discord.TextChannel | None = None,
+    ):
+        if an is not None:
+            await self.db.set(interaction.guild_id, "level_system_enabled", an)
+        if ankuendigungskanal is not None:
+            await self.db.set(interaction.guild_id, "level_announce_channel", ankuendigungskanal.id)
+        active = self.db.get_bool(interaction.guild_id, "level_system_enabled")
+        await interaction.response.send_message(f"Levelsystem ist {'an' if active else 'aus'}.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):

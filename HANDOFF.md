@@ -99,10 +99,6 @@ Fertig:
 - **Voice-Statistik**: `bot/cogs/voicestats.py` (Details siehe unten bei „Fertig“).
 
 Noch offen:
-- **Levelsystem**: 15–25 XP pro Nachricht, 60 s Abklingzeit, Formel 5·l² + 50·l + 100; Rangkarte
-  (Pillow), `/rangliste`, Level-up-Nachricht, Rollen-Belohnungen, Kanäle/Rollen ohne XP, Admin-XP-Befehle.
-  `bot/cogs/voicestats.py` sammelt schon XP/Sekunden in derselben `levels`-Tabelle, Message-XP und
-  Rangkarte fehlen noch.
 - **Benachrichtigungen: Twitch** — braucht `TWITCH_CLIENT_ID`/`SECRET` (Daves Entscheidung), als
   neuer `Provider` in `bot/notify/` nach demselben Muster wie `youtube.py`
 
@@ -127,6 +123,15 @@ Fertig:
   eigener Cog) — Wortfilter, Großbuchstaben, Emoji-Spam, Link-Filter mit erlaubten Domains, jeder
   Verstoß zusätzlich als automatische Verwarnung (`add_warning`, vom Bot selbst als Moderator,
   zählt auch in Richtung der automatischen Strafschwelle). `/setup automod` bzw. im Klick-Panel.
+- **Levelsystem**: `bot/cogs/levels.py` + `bot/cogs/rankcard.py` (Pillow, braucht `fonts-dejavu-core`
+  im Docker-Image, siehe Dockerfile). 15–25 XP/Nachricht, 60 s Abklingzeit, Formel 5·l²+50·l+100,
+  `/rang` (Rangkarte als Bild, fällt auf reinen Text zurück falls das Bild mal nicht gebaut werden
+  kann), `/rangliste` (Top 10), Level-Up-Nachricht (eigener Kanal einstellbar), Rollen-Belohnungen
+  (`/level-belohnung`, kumulativ — alle Belohnungen bis zum erreichten Level), Kanäle/Rollen ohne
+  XP (`/level-kanal-ohne-xp`, `/level-rolle-ohne-xp`), Admin-XP-Befehl (`/level-xp-geben`, auch
+  negativ). Komplett abgeschaltet (`level_system_enabled`), bis ein Server es per `/setup level`
+  oder im Klick-Panel einschaltet — kein Server bekommt das Verhalten ungefragt. Teilt sich die
+  `levels`-Tabelle mit `bot/cogs/voicestats.py` (dort schon XP/Sekunden pro Minute Sprachzeit).
 
 Abhängigkeiten dafür: `pillow`, `tzdata` in requirements.txt ergänzen.
 Discord erlaubt höchstens 100 Top-Level-Slash-Befehle; neue Funktionen als Gruppen anlegen
