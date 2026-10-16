@@ -237,6 +237,26 @@ def test_github_provider_dedup_and_transitions():
     run(go())
 
 
+def test_github_embeds_include_link_field():
+    from bot.notify.github import GitHubProvider
+
+    provider = GitHubProvider()
+    release = {"id": 1, "name": "v1", "html_url": "https://github.com/o/r/releases/v1"}
+    issue = {"number": 5, "title": "Bug", "labels": [], "html_url": "https://github.com/o/r/issues/5"}
+    pr = {"number": 7, "title": "Fix", "labels": [], "html_url": "https://github.com/o/r/pull/7"}
+    commit = {"sha": "abcdef1", "commit": {"message": "Fix"}, "html_url": "https://github.com/o/r/commit/abcdef1"}
+
+    for embed, url in [
+        (provider._release_embed("o/r", release), release["html_url"]),
+        (provider._issue_embed("o/r", issue, False), issue["html_url"]),
+        (provider._pr_embed("o/r", pr, "pr_open"), pr["html_url"]),
+        (provider._commit_embed("o/r", commit), commit["html_url"]),
+    ]:
+        assert embed.url == url  # Titel bleibt verlinkt
+        link_fields = [f for f in embed.fields if f.name == "Link"]
+        assert len(link_fields) == 1 and url in link_fields[0].value
+
+
 def test_github_provider_filters_and_baseline_skip():
     from bot.notify.github import GitHubProvider
 

@@ -66,6 +66,13 @@ def _labels(item: dict) -> str:
     return ", ".join(names) if names else "–"
 
 
+def _add_link_field(e: discord.Embed, url: str | None) -> None:
+    """Zusätzlich zum schon über `url=` verlinkten Titel ein eigenes Feld mit dem Link — der
+    Titel-Link ist auf Mobile leicht zu übersehen, ein sichtbarer Link darunter nicht."""
+    if url:
+        e.add_field(name="Link", value=f"[Auf GitHub ansehen]({url})", inline=False)
+
+
 def _match_filters(item: dict, filters: dict) -> bool:
     want_labels = filters.get("labels")
     if want_labels:
@@ -131,6 +138,7 @@ class GitHubProvider(Provider):
         e.add_field(name="Repository", value=source)
         e.add_field(name="Autor", value=(r.get("author") or {}).get("login", "–"))
         e.add_field(name="Veröffentlicht", value=_fmt_date(r.get("published_at")))
+        _add_link_field(e, r.get("html_url"))
         if r.get("prerelease"):
             e.set_footer(text="Pre-Release")
         return e
@@ -144,6 +152,7 @@ class GitHubProvider(Provider):
         e.add_field(name="Repository", value=source)
         e.add_field(name="Autor", value=(i.get("user") or {}).get("login", "–"))
         e.add_field(name="Labels", value=_labels(i))
+        _add_link_field(e, i.get("html_url"))
         return e
 
     def _pr_embed(self, source: str, p: dict, kind: str) -> discord.Embed:
@@ -155,6 +164,7 @@ class GitHubProvider(Provider):
         e.add_field(name="Repository", value=source)
         e.add_field(name="Autor", value=(p.get("user") or {}).get("login", "–"))
         e.add_field(name="Status", value=status_text)
+        _add_link_field(e, p.get("html_url"))
         return e
 
     def _commit_embed(self, source: str, c: dict) -> discord.Embed:
@@ -166,6 +176,7 @@ class GitHubProvider(Provider):
         e.add_field(name="Repository", value=source)
         e.add_field(name="Autor", value=author)
         e.add_field(name="SHA", value=(c.get("sha") or "")[:7])
+        _add_link_field(e, c.get("html_url"))
         return e
 
     # ---- Abfragen -------------------------------------------------------------------------
