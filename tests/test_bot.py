@@ -55,6 +55,7 @@ def test_all_commands_register():
                      "sprachzeit", "setup sprachzeit-xp", "giveaway-erstellen", "giveaway-reroll",
                      "setup automod", "rang", "rangliste", "level-xp-geben", "level-belohnung",
                      "level-kanal-ohne-xp", "level-rolle-ohne-xp", "setup level",
+                     "server", "server-neustart", "server-update",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -1058,6 +1059,69 @@ def test_rank_card_renders_valid_png():
     # xp_needed=0 (Edge-Case) darf nicht durch Null teilen
     buf2 = render_rank_card(fake_avatar.getvalue(), "TestUser", level=0, rank=1, xp_into_level=0, xp_needed=0)
     assert Image.open(buf2).size == (WIDTH, HEIGHT)
+
+
+def test_server_cpu_and_memory_calculations():
+    from bot.serverstatus import cpu_percent_from_samples, parse_meminfo, ram_usage_kb
+
+    # user nice system idle iowait irq softirq steal (verkürzt, Rest wird ignoriert)
+    a = [100, 0, 50, 800, 50, 0, 0, 0]
+    b = [150, 0, 70, 820, 60, 0, 0, 0]  # delta_total=100, delta_idle(idle+iowait)=30 -> 70% genutzt
+    assert cpu_percent_from_samples(a, b) == 70.0
+    assert cpu_percent_from_samples(a, a) == 0.0  # keine Zeit vergangen -> 0 statt Division durch 0
+
+    meminfo_text = "MemTotal:       16000000 kB\nMemFree:         2000000 kB\nMemAvailable:    8000000 kB\n"
+    info = parse_meminfo(meminfo_text)
+    assert info == {"MemTotal": 16000000, "MemFree": 2000000, "MemAvailable": 8000000}
+    used, total = ram_usage_kb(info)
+    assert (used, total) == (8000000, 16000000)  # über MemAvailable, nicht MemFree
+
+
+def test_server_fmt_bytes_and_uptime():
+    from bot.serverstatus import fmt_bytes, format_uptime
+
+    assert fmt_bytes(500) == "500 B"
+    assert fmt_bytes(2048) == "2.0 KB"
+    assert fmt_bytes(5 * 1024 * 1024 * 1024) == "5.0 GB"
+
+    assert format_uptime(90) == "1 Min."
+    assert format_uptime(3 * 3600 + 90) == "3 Std. 1 Min."
+    assert format_uptime(2 * 86400 + 3 * 3600) == "2 Tag(e) 3 Std."
+
+
+def test_server_build_recreate_config_translates_inspect_data():
+    from bot.serverstatus import build_recreate_config
+
+    inspect_data = {
+        "Name": "/thewashbot",
+        "Config": {
+            "Env": ["DISCORD_TOKEN=secret", "LOG_LEVEL=INFO"],
+            "Labels": {"com.docker.compose.project": "thewashbot"},
+            "ExposedPorts": {"8787/tcp": {}, "8789/tcp": {}},
+        },
+        "HostConfig": {
+            "Binds": ["/mnt/user/appdata/thewashbot/data:/data"],
+            "PortBindings": {
+                "8787/tcp": [{"HostIp": "", "HostPort": "8787"}],
+                "8789/tcp": [{"HostIp": "", "HostPort": "8789"}],
+            },
+            "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
+            "NetworkMode": "bridge",
+        },
+    }
+    cfg = build_recreate_config(inspect_data, "ghcr.io/navonex/thewashbot:v2")
+    assert cfg["name"] == "thewashbot"  # führender "/" aus dem Inspect-Namen entfernt
+    assert cfg["image"] == "ghcr.io/navonex/thewashbot:v2"
+    assert cfg["environment"] == ["DISCORD_TOKEN=secret", "LOG_LEVEL=INFO"]
+    assert cfg["host_config_kwargs"]["binds"] == ["/mnt/user/appdata/thewashbot/data:/data"]
+    assert cfg["host_config_kwargs"]["port_bindings"] == {"8787/tcp": "8787", "8789/tcp": "8789"}
+    assert cfg["host_config_kwargs"]["restart_policy"]["Name"] == "unless-stopped"
+    assert cfg["host_config_kwargs"]["network_mode"] == "bridge"
+
+    # Fehlende/leere Felder (z. B. ein ganz schlicht konfigurierter Container) crashen nicht
+    minimal = build_recreate_config({"Name": "x", "Config": {}, "HostConfig": {}}, "img:latest")
+    assert minimal["host_config_kwargs"]["restart_policy"] == {"Name": "unless-stopped"}
+    assert minimal["host_config_kwargs"]["port_bindings"] == {}
 
 
 def test_youtube_validate_source_rejects_non_channel_ids():

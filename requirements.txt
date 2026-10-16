@@ -4,3 +4,4 @@ yt-dlp[default]
 tzdata
 aiohttp
 Pillow>=10
+docker>=7

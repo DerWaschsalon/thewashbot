@@ -38,6 +38,7 @@ COGS = [
     "bot.cogs.voicestats",
     "bot.cogs.giveaways",
     "bot.cogs.levels",
+    "bot.cogs.server",
 ]
 
 

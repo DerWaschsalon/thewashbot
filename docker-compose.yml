@@ -9,3 +9,7 @@ services:
       - "8789:8789"   # Web-Dashboard
     volumes:
       - ./data:/data
+      # Für /server (Server-Status, Container-Liste, Selbst-Update): gibt dem Bot-Container
+      # praktisch Root-Zugriff auf diesen Host. Standardmäßig auskommentiert — nur einkommentieren,
+      # wenn OWNER_ID in der .env gesetzt ist und du das bewusst willst.
+      # - /var/run/docker.sock:/var/run/docker.sock

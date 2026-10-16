@@ -36,6 +36,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **Benachrichtigungen: YouTube** | Dienst „YouTube" im Klick-Assistenten (🔔) | Neue Videos per öffentlichem RSS-Feed, ohne API-Schlüssel — braucht die Kanal-ID (beginnt mit „UC…"). |
 | **Giveaways** | `/giveaway-erstellen kanal: preis: dauer: gewinner:`, `/giveaway-reroll` | Embed mit „🎉 Teilnehmen"-Button (An-/Abmelden), automatische Auslosung nach Ablauf, Reroll für neue Gewinner. `dauer` im selben Format wie bei `/erinnere` (z. B. `2h`, `1d2h`). |
 | **Levelsystem** | `/rang`, `/rangliste`, `/level-xp-geben`, `/level-belohnung`, `/level-kanal-ohne-xp`, `/level-rolle-ohne-xp`, an/aus per `/setup level` oder im Klick-Panel | 15–25 XP pro Nachricht (60 s Abklingzeit), Rangkarte als Bild, Level-Up-Nachricht, kumulative Rollen-Belohnungen. Standardmäßig **aus**, bis ein Server es einschaltet. |
+| **Server-Status** | `/server`, `/server-neustart container:`, `/server-update` — nur für `OWNER_ID` | CPU/RAM/Uptime/Festplatte, laufende Container. `/server-update` zieht das neueste Image von GHCR und ersetzt den Bot-Container live damit (kurze Downtime). Braucht den Docker-Socket gemountet (in `docker-compose.yml` auskommentiert, siehe „Server-Status einrichten" unten) — **Root-Zugriff auf den Host**, deshalb bewusst nur eine einzelne Person statt einer Rolle. |
 | **Automod erweitert** | `/setup automod`, auch im Klick-Panel | Wortfilter, Großbuchstaben-Filter, Emoji-Spam-Grenze, Link-Filter mit erlaubten Domains — jeder Verstoß zählt zusätzlich als automatische Verwarnung (zählt mit Richtung der automatischen Strafschwelle). |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
@@ -248,6 +249,30 @@ dieses Repos).
 2. `/setup dps-webhook kanal:#dps` in Discord ausführen (oder im Klick-Panel unter „DPS-Webhook“) →
    Antwort enthält die URL (`http://<HOST>:8787/dps/<Token>`), die in die DeckBar-Einstellungen gehört.
 3. URL geheim halten — wer sie hat, kann in diesem Kanal posten.
+
+## Server-Status einrichten
+
+`/server` (Status, laufende Container), `/server-neustart container:` (ein anderer Container neu
+starten) und `/server-update` (den Bot-Container selbst mit dem neuesten GHCR-Image aktualisieren)
+brauchen Zugriff auf den Docker-Daemon des Hosts — das ist **Root-Zugriff auf diesen Server**,
+deshalb bewusst nicht standardmäßig aktiv und auf eine einzelne Person beschränkt statt auf eine
+Rolle.
+
+1. In `docker-compose.yml` die auskommentierte Zeile beim `volumes:`-Block einkommentieren:
+   `- /var/run/docker.sock:/var/run/docker.sock`
+2. In der `.env`: `OWNER_ID=<deine Discord-User-ID>` eintragen (Rechtsklick auf dich selbst in
+   Discord → ID kopieren, braucht den Entwicklermodus). Nur diese Person sieht die drei Befehle.
+3. `docker compose up -d` — danach sind `/server`, `/server-neustart`, `/server-update` aktiv.
+
+**Wie `/server-update` funktioniert:** zieht `ghcr.io/navonex/thewashbot:latest`, liest die
+laufende Container-Konfiguration aus (Umgebungsvariablen, Volumes, Ports, Restart-Policy) und
+startet damit einen kurzlebigen Helfer-Container (`bot/selfupdate_helper.py`), der wartet, bis
+der alte Bot-Container gestoppt ist, ihn entfernt und den neuen mit identischer Konfiguration,
+aber dem neuen Image anlegt. Läuft als eigener Container, weil sich ein laufender Prozess nicht
+mitten im eigenen Lauf selbst ersetzen kann. Dauert ein paar Sekunden, in denen der Bot offline
+ist. **Falls dabei etwas schiefgeht:** auf unraid-server `cd /mnt/user/appdata/thewashbot && docker
+compose up -d` stellt den Bot anhand der `docker-compose.yml` wieder her — die bleibt die ganze
+Zeit unverändert auf der Platte liegen, als Netz.
 
 ## Entwickeln und testen
 

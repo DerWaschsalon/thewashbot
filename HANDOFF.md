@@ -83,14 +83,15 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
 
 ## Noch zu bauen (Daves Auswahl)
 
-Noch offen, braucht eine Entscheidung von Dave:
-- **Server-Status `/server`** (nur Dave, Env `OWNER_ID`): CPU/RAM/Uptime aus /proc, Plattenplatz
-  der gemounteten Unraid-Pfade, Container über den Docker-Socket (optional gemountet, Hinweis: Socket
-  = Root-Zugriff). Neustart eines Containers nur mit Bestätigung. **Braucht vorher eine
-  Entscheidung** (Docker-Socket mounten = Root-Zugriff für den Container) — deshalb bewusst noch
-  nicht gebaut.
-
 Fertig:
+- **Server-Status**: `bot/cogs/server.py` + `bot/serverstatus.py` (reine Hilfsfunktionen,
+  ohne discord.py/docker-Importe) + `bot/selfupdate_helper.py` (eigenständiges Skript). `/server`
+  (CPU/RAM/Uptime aus `/proc`, Festplatte unter `/data`, laufende Container über den Docker-Socket),
+  `/server-neustart container:` (mit Bestätigung), `/server-update` (zieht `ghcr.io/navonex/
+  thewashbot:latest`, ersetzt den **eigenen** Container live damit — siehe „Server-Status
+  einrichten" im README für den genauen Ablauf). Nur für `OWNER_ID` (Env), nicht für eine Rolle,
+  weil der Docker-Socket praktisch Root-Zugriff auf unraid-server ist. Socket-Mount in
+  `docker-compose.yml` bewusst auskommentiert, nicht standardmäßig aktiv.
 - **Starboard**: `bot/cogs/starboard.py`. `/setup starboard kanal: schwelle:` (auch im
   Klick-Panel). ⭐ ab Schwelle (Standard 3, eigener Stern des Autors zählt nicht) → Embed im
   Highlight-Kanal, Zähler aktualisiert sich live über `on_raw_reaction_add/remove`, Post
