@@ -28,7 +28,7 @@ def test_all_commands_register():
             for cog_name, loop_name in [
                 ("Reminders", "check_due"), ("Notifications", "poll_feeds"),
                 ("Bump", "check_due"), ("Stats", "refresh"), ("Birthdays", "check"),
-                ("Announcements", "check_due"), ("VoiceStats", "tick"),
+                ("Announcements", "check_due"), ("VoiceStats", "tick"), ("Giveaways", "check_due"),
             ]:
                 loop = getattr(bot.get_cog(cog_name), loop_name)
                 task = loop.get_task()
@@ -52,7 +52,7 @@ def test_all_commands_register():
                      "setup bots-zaehler", "umfrage", "geburtstag-setzen", "geburtstag-loeschen", "geburtstag",
                      "setup geburtstage", "embed-erstellen", "befehl-erstellen", "befehl-loeschen", "befehle",
                      "ankuendigung-erstellen", "ankuendigungen", "ankuendigung-loeschen",
-                     "sprachzeit", "setup sprachzeit-xp",
+                     "sprachzeit", "setup sprachzeit-xp", "giveaway-erstellen", "giveaway-reroll",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -911,6 +911,52 @@ def test_youtube_provider_dedup_and_baseline():
         notes3, state3 = await provider.poll("UCabc", ["video"], {}, state2, baseline=False)
         assert len(notes3) == 1 and notes3[0].event == "video"
         assert "VIDEO3" in state3["seen"]
+
+    run(go())
+
+
+def test_giveaway_embed_running_and_ended():
+    import time
+
+    from bot.cogs.giveaways import build_giveaway_embed
+
+    running = build_giveaway_embed("Steam-Key", 2, time.time() + 3600, host_id=42)
+    assert running.title == "🎉 Giveaway"
+    assert any(f.name == "Gestartet von" and f.value == "<@42>" for f in running.fields)
+
+    ended_with_winners = build_giveaway_embed("Steam-Key", 2, time.time(), None, ended=True, winner_ids=[1, 2])
+    assert ended_with_winners.title == "🎉 Giveaway beendet"
+    assert "<@1>" in ended_with_winners.fields[0].value and "<@2>" in ended_with_winners.fields[0].value
+
+    ended_no_entries = build_giveaway_embed("Steam-Key", 2, time.time(), None, ended=True, winner_ids=[])
+    assert ended_no_entries.fields[0].value == "Niemand hat teilgenommen"
+
+
+def test_giveaway_pick_winners_respects_count_and_uses_entries():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.giveaways import Giveaways
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+            for uid in (1, 2, 3):
+                await db.execute("INSERT INTO giveaway_entries (message_id, user_id) VALUES (?, ?)", (99, uid))
+
+            cog = Giveaways.__new__(Giveaways)
+            cog.db = db
+
+            winners = await cog.pick_winners(99, 2)
+            assert len(winners) == 2
+            assert set(winners) <= {1, 2, 3}
+
+            no_entries = await cog.pick_winners(100, 2)
+            assert no_entries == []
+
+            await db.close()
 
     run(go())
 

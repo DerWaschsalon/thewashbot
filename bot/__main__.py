@@ -36,6 +36,7 @@ COGS = [
     "bot.cogs.customcommands",
     "bot.cogs.announcements",
     "bot.cogs.voicestats",
+    "bot.cogs.giveaways",
 ]
 
 
