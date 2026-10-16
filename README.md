@@ -25,6 +25,7 @@ Ein Bot für alles, was ihr bisher mit mehreren Bots macht. Alle Befehle sind Sl
 | **DJ-Rolle** | `/setup dj-rolle` | Optional: Dann dürfen nur DJ, Admins und wer den Song gewünscht hat, überspringen und stoppen. |
 | **Bump-Erinnerung** | `/setup bump kanal: rolle:`, auch im Klick-Panel | Erkennt die Bump-Bestätigung von [DISBOARD](https://disboard.org) im festgelegten Kanal und erinnert nach Ablauf des 2-Stunden-Cooldowns per Ping (optionale Rolle) daran, `/bump` erneut zu tippen. Rein passiv, der Bot bumpt nicht selbst. |
 | **Mitglieder-Zähler** | `/setup mitglieder-zaehler kanal:`, auch im Klick-Panel | Name eines Sprachkanals zeigt laufend die aktuelle Mitgliederzahl (z. B. „👥 Mitglieder: 123“), aktualisiert bei Beitritt/Austritt und mindestens alle 10 Minuten (Discords Limit für Kanal-Umbenennungen). |
+| **Starboard** | `/setup starboard kanal: schwelle:`, auch im Klick-Panel | Nachrichten ab X ⭐-Reaktionen (ohne die des Autors selbst, Standard 3) landen als Embed in einem Highlight-Kanal, Sterne-Zähler aktualisiert sich live, Post verschwindet wieder, wenn die Reaktionen unter die Schwelle fallen. |
 
 `/setup anzeigen` zeigt alle Einstellungen, `/setup panel` öffnet sie zum Anklicken (Kanal-/Rollen-
 Auswahl per Dropdown, Text per Formular, Ein/Aus per Knopf — kein Befehl tippen nötig). Das

@@ -575,6 +575,55 @@ class MemberCountView(discord.ui.View):
         self.add_item(BackButton(panel))
 
 
+class StarboardChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(placeholder="Highlight-Kanal für das Starboard wählen …",
+                         channel_types=[discord.ChannelType.text], row=0, custom_id="setup:select:starboard_channel")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        channel = interaction.guild.get_channel(self.values[0].id) or self.values[0]
+        if hasattr(channel, "permissions_for") and not channel.permissions_for(interaction.guild.me).send_messages:
+            return await interaction.response.send_message(f"Ich darf in {channel.mention} nicht schreiben.", ephemeral=True)
+        await self.panel.cog.db.set(interaction.guild_id, "starboard_channel", channel.id)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=StarboardView(self.panel))
+
+
+class StarboardThresholdModal(discord.ui.Modal, title="Starboard-Schwelle"):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__()
+        self.panel = panel
+        current = panel.cog.db.get_int(panel.guild.id, "starboard_threshold") or 3
+        self.schwelle = discord.ui.TextInput(label="Sterne bis zum Highlight-Kanal", default=str(current), max_length=3)
+        self.add_item(self.schwelle)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = str(self.schwelle.value).strip()
+        if not raw.isdigit() or not (1 <= int(raw) <= 100):
+            return await interaction.response.send_message("Bitte eine Zahl von 1 bis 100 eingeben.", ephemeral=True)
+        await self.panel.cog.db.set(interaction.guild_id, "starboard_threshold", int(raw))
+        await interaction.response.edit_message(embed=self.panel.embed(), view=StarboardView(self.panel))
+
+
+class StarboardThresholdButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Schwelle ändern", emoji="🔢", style=discord.ButtonStyle.secondary, row=1,
+                         custom_id="setup:starboard_threshold_btn")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(StarboardThresholdModal(self.panel))
+
+
+class StarboardView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.add_item(StarboardChannelSelect(panel))
+        self.add_item(StarboardThresholdButton(panel))
+        self.add_item(ClearButton("Starboard aus", "starboard_channel", panel, row=2))
+        self.add_item(BackButton(panel))
+
+
 class VerifySetupChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(placeholder="Regel-Kanal wählen …", channel_types=[discord.ChannelType.text], row=0,
@@ -826,6 +875,11 @@ class SettingsPanel(discord.ui.View):
     async def member_count(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=MemberCountView(self))
 
+    @discord.ui.button(label="Starboard", emoji="⭐", style=discord.ButtonStyle.secondary, row=4,
+                       custom_id="setup:open:starboard")
+    async def starboard(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=StarboardView(self))
+
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
 
@@ -873,6 +927,10 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="Bump-Erinnerung", value=fmt_channel(guild, bump_channel) if bump_channel else "aus")
         member_count_channel = db.get_int(guild.id, "member_count_channel")
         e.add_field(name="Mitglieder-Zähler", value=fmt_channel(guild, member_count_channel) if member_count_channel else "aus")
+        starboard_channel = db.get_int(guild.id, "starboard_channel")
+        starboard_threshold = db.get_int(guild.id, "starboard_threshold") or 3
+        e.add_field(name="Starboard",
+                    value=f"{fmt_channel(guild, starboard_channel)} (ab {starboard_threshold} ⭐)" if starboard_channel else "aus")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -1152,6 +1210,25 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
                 await stats_cog.update_guild(interaction.guild)
         await interaction.response.send_message(
             f"{kanal.mention} zeigt jetzt die Mitgliederzahl." if kanal else "Mitglieder-Zähler ist aus.", ephemeral=True
+        )
+
+    @app_commands.command(name="starboard", description="Nachrichten ab X ⭐-Reaktionen in einen Highlight-Kanal spiegeln")
+    @app_commands.describe(
+        kanal="Highlight-Kanal für gestarrte Nachrichten; leer lassen = aus",
+        schwelle="Wie viele ⭐ (ohne die des Autors selbst) nötig sind (Standard 3)",
+    )
+    async def starboard_settings(
+        self, interaction: discord.Interaction, kanal: discord.TextChannel | None = None,
+        schwelle: app_commands.Range[int, 1, 100] = 3,
+    ):
+        if kanal and not kanal.permissions_for(interaction.guild.me).send_messages:
+            return await interaction.response.send_message(f"Ich darf in {kanal.mention} nicht schreiben.", ephemeral=True)
+        await self.db.set(interaction.guild_id, "starboard_channel", kanal and kanal.id)
+        if kanal:
+            await self.db.set(interaction.guild_id, "starboard_threshold", schwelle)
+        await interaction.response.send_message(
+            f"Starboard aktiv: ab {schwelle} ⭐ landen Nachrichten in {kanal.mention}." if kanal else "Starboard ist aus.",
+            ephemeral=True,
         )
 
     @commands.Cog.listener()

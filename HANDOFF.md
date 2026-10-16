@@ -85,10 +85,17 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
 
 Gewählt:
 - **Voice-Statistik**: Zeit im Sprachkanal (nicht allein, nicht AFK/taub), optional XP pro Minute.
-- **Starboard**: ⭐ ab Schwelle (Standard 3) → Highlight-Kanal, Zähler aktualisieren.
 - **Server-Status `/server`** (nur Dave, Env `OWNER_ID`): CPU/RAM/Uptime aus /proc, Plattenplatz
   der gemounteten Unraid-Pfade, Container über den Docker-Socket (optional gemountet, Hinweis: Socket
-  = Root-Zugriff). Neustart eines Containers nur mit Bestätigung.
+  = Root-Zugriff). Neustart eines Containers nur mit Bestätigung. **Braucht vorher eine
+  Entscheidung von Dave** (Docker-Socket mounten = Root-Zugriff für den Container).
+
+Fertig:
+- **Starboard**: `bot/cogs/starboard.py`. `/setup starboard kanal: schwelle:` (auch im
+  Klick-Panel). ⭐ ab Schwelle (Standard 3, eigener Stern des Autors zählt nicht) → Embed im
+  Highlight-Kanal, Zähler aktualisiert sich live über `on_raw_reaction_add/remove`, Post
+  verschwindet wieder, wenn die Reaktionen unter die Schwelle fallen. Nutzt die schon vorhandene
+  `starboard`-Tabelle in `db.py`.
 
 Fehlende MEE6-Funktionen:
 - **Levelsystem**: 15–25 XP pro Nachricht, 60 s Abklingzeit, Formel 5·l² + 50·l + 100; Rangkarte

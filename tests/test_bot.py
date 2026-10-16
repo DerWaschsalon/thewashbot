@@ -47,7 +47,7 @@ def test_all_commands_register():
                      "setup verifizierung", "setup regeln-text", "setup verwarnungen", "rollen-panel", "timeout",
                      "warn", "warnungen", "warnung-loeschen", "kick", "ban", "unban",
                      "erinnere", "erinnerungen", "erinnerung-loeschen", "setup dps-webhook", "setup dashboard", "aion",
-                     "setup tickets", "ticket-panel", "setup bump", "setup mitglieder-zaehler",
+                     "setup tickets", "ticket-panel", "setup bump", "setup mitglieder-zaehler", "setup starboard",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -120,11 +120,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 15  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 16  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 16  # inkl. Schließen
+    assert len(ephemeral.children) == 17  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -561,7 +561,9 @@ def test_new_panel_subviews_build_without_overflow():
     muss ohne ValueError konstruierbar sein, in beiden Verifizierungs-Zuständen."""
     from pathlib import Path
 
-    from bot.cogs.settings import BumpView, DashboardRoleView, MemberCountView, SettingsPanel, WarnView, VerifyView
+    from bot.cogs.settings import (
+        BumpView, DashboardRoleView, MemberCountView, SettingsPanel, StarboardView, WarnView, VerifyView,
+    )
     from bot.db import Database
 
     cog = type("FakeCog", (), {})()
@@ -570,7 +572,7 @@ def test_new_panel_subviews_build_without_overflow():
     panel = SettingsPanel.__new__(SettingsPanel)
     panel.cog, panel.guild, panel.persistent = cog, guild, True
 
-    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView]:
+    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView, StarboardView]:
         view = view_cls(panel)
         assert all(item.custom_id for item in view.children)
 
@@ -578,3 +580,134 @@ def test_new_panel_subviews_build_without_overflow():
         cog.db._settings[1] = {"verify_active": "1" if active else "0"}
         view = VerifyView(panel)
         assert all(item.custom_id for item in view.children)
+
+
+def test_starboard_embed():
+    import datetime
+
+    from bot.cogs.starboard import build_star_embed
+
+    class FakeAuthor:
+        id = 1
+        display_avatar = type("Avatar", (), {"url": "http://x/avatar.png"})()
+
+        def __str__(self):
+            return "Alice#0001"
+
+    class FakeMessage:
+        content = "Schaut mal!"
+        author = FakeAuthor()
+        attachments: list = []
+        created_at = datetime.datetime.now(datetime.timezone.utc)
+        jump_url = "https://discord.com/channels/1/2/3"
+
+    embed = build_star_embed(FakeMessage(), 5)
+    assert embed.description == "Schaut mal!"
+    assert embed.author.name == "Alice#0001"
+    assert "zur Nachricht" in embed.fields[0].value
+
+
+def test_starboard_count_excludes_authors_own_star():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.starboard import STAR_EMOJI, Starboard
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+            cog = Starboard.__new__(Starboard)
+            cog.db = db
+
+            class FakeUser:
+                def __init__(self, uid):
+                    self.id = uid
+
+            class FakeReaction:
+                emoji = STAR_EMOJI
+
+                def __init__(self, user_ids):
+                    self._ids = user_ids
+
+                async def users(self):
+                    for uid in self._ids:
+                        yield FakeUser(uid)
+
+            class FakeMessage:
+                author = FakeUser(1)
+                reactions = [FakeReaction([1, 2, 3])]  # Autor (1) selbst + zwei andere
+
+            count = await cog._star_count(FakeMessage())
+            assert count == 2  # der eigene Stern des Autors zählt nicht
+
+            await db.close()
+
+    run(go())
+
+
+def test_starboard_sync_respects_threshold_and_persists_post():
+    import datetime
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.starboard import Starboard
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+            await db.set(1, "starboard_threshold", 3)
+
+            posted = []
+
+            class FakeStarMessage:
+                id = 999
+
+            class FakeBoardChannel:
+                async def send(self, content=None, embed=None):
+                    posted.append((content, embed))
+                    return FakeStarMessage()
+
+            class FakeChannel:
+                mention = "#general"
+
+            class FakeAuthor:
+                id = 1
+                display_avatar = type("A", (), {"url": "x"})()
+
+                def __str__(self):
+                    return "Alice"
+
+            class FakeGuild:
+                id = 1
+
+                def get_channel(self, cid):
+                    return FakeBoardChannel()
+
+            class FakeMessage:
+                id = 42
+                guild = FakeGuild()
+                channel = FakeChannel()
+                author = FakeAuthor()
+                content = "hi"
+                attachments: list = []
+                created_at = datetime.datetime.now(datetime.timezone.utc)
+                jump_url = "https://discord.com/x"
+
+            cog = Starboard.__new__(Starboard)
+            cog.db = db
+
+            await cog._sync(FakeMessage(), count=2, board_channel_id=55)
+            assert posted == []  # unter der Schwelle -> kein Post
+
+            await cog._sync(FakeMessage(), count=3, board_channel_id=55)
+            assert len(posted) == 1  # Schwelle erreicht -> Post
+            row = await db.fetchone("SELECT star_message_id FROM starboard WHERE message_id=?", (42,))
+            assert row["star_message_id"] == 999
+
+            await db.close()
+
+    run(go())

@@ -29,6 +29,7 @@ COGS = [
     "bot.cogs.aion_dedup",
     "bot.cogs.bump",
     "bot.cogs.stats",
+    "bot.cogs.starboard",
 ]
 
 
