@@ -28,6 +28,22 @@ SPAM_COUNT = 6
 SPAM_WINDOW = 8.0
 MENTION_LIMIT = 6
 INVITE_RE = re.compile(r"(?:discord(?:app)?\.com/invite|discord\.gg)/[\w-]+", re.I)
+LINK_RE = re.compile(r"https?://([\w.-]+)", re.I)
+EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U00002190-\U000021FF]|<a?:\w+:\d+>")
+CAPS_MIN_LETTERS = 10
+CAPS_RATIO = 0.7
+
+
+def caps_ratio(text: str) -> float:
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < CAPS_MIN_LETTERS:
+        return 0.0
+    return sum(1 for c in letters if c.isupper()) / len(letters)
+
+
+def domain_allowed(domain: str, allowed: set[str]) -> bool:
+    domain = domain.lower()
+    return any(domain == a or domain.endswith(f".{a}") for a in allowed)
 
 
 def clip(text: str | None, limit: int = 1000) -> str:
@@ -70,6 +86,11 @@ class Moderation(commands.Cog):
 
         if not self.db.get_bool(guild.id, "allow_invites") and INVITE_RE.search(message.content):
             await self._punish(message, [message], None, "Einladungslink")
+            return
+
+        automod_reason = await self._check_automod(message)
+        if automod_reason:
+            await self._automod_violation(message, automod_reason)
             return
 
         if len(message.raw_mentions) + len(message.raw_role_mentions) > MENTION_LIMIT:
@@ -116,6 +137,48 @@ class Moderation(commands.Cog):
         e.add_field(name="Maßnahme", value=f"{len(messages)} Nachricht(en) gelöscht"
                     + (f", Timeout {int(timeout.total_seconds() // 60)} Min." if did_timeout else ""))
         await self.log(message.guild, e)
+
+    # ---- Automod: Wortfilter, Großbuchstaben, Emoji-Spam, Link-Filter ----
+
+    async def _check_automod(self, message: discord.Message) -> str | None:
+        guild_id = message.guild.id
+        content = message.content
+
+        banned_raw = self.db.get(guild_id, "automod_banned_words")
+        if banned_raw:
+            words = [w.strip().lower() for w in banned_raw.split(",") if w.strip()]
+            content_lower = content.lower()
+            if any(w in content_lower for w in words):
+                return "verbotenes Wort"
+
+        if self.db.get_bool(guild_id, "automod_caps") and caps_ratio(content) > CAPS_RATIO:
+            return "zu viele Großbuchstaben"
+
+        emoji_limit = self.db.get_int(guild_id, "automod_emoji_limit")
+        if emoji_limit and len(EMOJI_RE.findall(content)) > emoji_limit:
+            return "Emoji-Spam"
+
+        if self.db.get_bool(guild_id, "automod_link_filter"):
+            allowed = {d.strip().lower() for d in (self.db.get(guild_id, "automod_allowed_domains") or "").split(",") if d.strip()}
+            for domain in LINK_RE.findall(content):
+                if not domain_allowed(domain, allowed):
+                    return "nicht erlaubter Link"
+
+        return None
+
+    async def _automod_violation(self, message: discord.Message, reason: str) -> None:
+        self._own_deletes.add(message.id)
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            pass
+        try:
+            await message.channel.send(
+                f"{message.author.mention}, deine Nachricht wurde entfernt ({reason}).", delete_after=15
+            )
+        except discord.HTTPException:
+            pass
+        await self.add_warning(message.guild, message.author, self.bot.user, f"Automod: {reason}")
 
     # ---- Logs ----
 
@@ -238,30 +301,37 @@ class Moderation(commands.Cog):
     async def warn(self, interaction: discord.Interaction, mitglied: discord.Member, grund: str):
         if mitglied.bot:
             raise UserError("Bots kann ich nicht verwarnen.")
-        await self.db.execute(
-            "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, created) VALUES (?, ?, ?, ?, ?)",
-            (interaction.guild_id, mitglied.id, interaction.user.id, grund, time.time()),
-        )
-        count = len(await self.db.fetchall(
-            "SELECT id FROM warnings WHERE guild_id=? AND user_id=?", (interaction.guild_id, mitglied.id)
-        ))
-        try:
-            await mitglied.send(f"Du wurdest auf **{interaction.guild.name}** verwarnt (Nr. {count}).\n"
-                                f"Grund: {grund}")
-        except discord.HTTPException:
-            pass
+        count = await self.add_warning(interaction.guild, mitglied, interaction.user, grund)
         await interaction.response.send_message(
             f"{mitglied.mention} verwarnt (Nr. {count}). Grund: {grund}", ephemeral=True
         )
-        await self.log(interaction.guild, discord.Embed(
-            title=f"⚠️ Verwarnung Nr. {count}", colour=discord.Colour.yellow(),
-            description=f"{mitglied.mention} ({mitglied})\nVon {interaction.user.mention}\nGrund: {grund}",
-        ))
 
-        threshold = self.db.get_int(interaction.guild_id, "warn_threshold")
-        action = self.db.get(interaction.guild_id, "warn_action")
+    async def add_warning(
+        self, guild: discord.Guild, member: discord.Member, moderator: discord.abc.User, reason: str
+    ) -> int:
+        """Verwarnung eintragen, Betroffene/n per DM informieren, loggen, und bei Erreichen der
+        Schwelle automatisch bestrafen. Von `/warn` UND von den automatischen Automod-Verstößen
+        unten genutzt (Moderator dort: der Bot selbst)."""
+        await self.db.execute(
+            "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, created) VALUES (?, ?, ?, ?, ?)",
+            (guild.id, member.id, moderator.id, reason, time.time()),
+        )
+        count = len(await self.db.fetchall(
+            "SELECT id FROM warnings WHERE guild_id=? AND user_id=?", (guild.id, member.id)
+        ))
+        try:
+            await member.send(f"Du wurdest auf **{guild.name}** verwarnt (Nr. {count}).\nGrund: {reason}")
+        except discord.HTTPException:
+            pass
+        await self.log(guild, discord.Embed(
+            title=f"⚠️ Verwarnung Nr. {count}", colour=discord.Colour.yellow(),
+            description=f"{member.mention} ({member})\nVon {moderator.mention}\nGrund: {reason}",
+        ))
+        threshold = self.db.get_int(guild.id, "warn_threshold")
+        action = self.db.get(guild.id, "warn_action")
         if threshold and action and count == threshold:
-            await self._auto_punish(interaction.guild, mitglied, action, count)
+            await self._auto_punish(guild, member, action, count)
+        return count
 
     async def _auto_punish(self, guild: discord.Guild, member: discord.Member, action: str, count: int) -> None:
         me = guild.me

@@ -692,6 +692,81 @@ class VoiceXpButton(discord.ui.Button):
         await interaction.response.send_modal(VoiceXpModal(self.panel))
 
 
+class AutomodModal(discord.ui.Modal, title="Automod: Filter"):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__()
+        self.panel = panel
+        db = panel.cog.db
+        self.words = discord.ui.TextInput(
+            label="Wortfilter (durch Komma getrennt)", style=discord.TextStyle.paragraph, required=False,
+            default=db.get(panel.guild.id, "automod_banned_words") or "",
+        )
+        self.domains = discord.ui.TextInput(
+            label="Erlaubte Link-Domains (durch Komma getrennt)", style=discord.TextStyle.paragraph, required=False,
+            default=db.get(panel.guild.id, "automod_allowed_domains") or "",
+        )
+        self.emoji_limit = discord.ui.TextInput(
+            label="Emoji-Grenze pro Nachricht (0 = aus)", required=False, max_length=3,
+            default=str(db.get_int(panel.guild.id, "automod_emoji_limit") or 0),
+        )
+        for item in (self.words, self.domains, self.emoji_limit):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw_limit = str(self.emoji_limit.value).strip()
+        if raw_limit and not raw_limit.isdigit():
+            return await interaction.response.send_message("Emoji-Grenze muss eine Zahl sein.", ephemeral=True)
+        db = self.panel.cog.db
+        await db.set(interaction.guild_id, "automod_banned_words", str(self.words.value).strip() or None)
+        await db.set(interaction.guild_id, "automod_allowed_domains", str(self.domains.value).strip() or None)
+        await db.set(interaction.guild_id, "automod_emoji_limit", int(raw_limit) if raw_limit and int(raw_limit) else None)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=AutomodView(self.panel))
+
+
+class AutomodFiltersButton(discord.ui.Button):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(label="Wortfilter/Domains/Emoji-Grenze", emoji="✏️", style=discord.ButtonStyle.secondary,
+                         row=0, custom_id="setup:automod_filters_btn")
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AutomodModal(self.panel))
+
+
+class AutomodView(discord.ui.View):
+    def __init__(self, panel: "SettingsPanel"):
+        super().__init__(timeout=None if panel.persistent else 180)
+        self.panel = panel
+        self.add_item(AutomodFiltersButton(panel))
+        caps_on = panel.cog.db.get_bool(panel.guild.id, "automod_caps")
+        caps = discord.ui.Button(
+            label=f"Großbuchstaben-Filter: {'an' if caps_on else 'aus'} (klicken zum Umschalten)",
+            emoji="🔠", style=discord.ButtonStyle.success if caps_on else discord.ButtonStyle.secondary, row=1,
+            custom_id="setup:toggle:automod_caps",
+        )
+        caps.callback = self._toggle_caps
+        self.add_item(caps)
+        link_on = panel.cog.db.get_bool(panel.guild.id, "automod_link_filter")
+        links = discord.ui.Button(
+            label=f"Link-Filter (nur erlaubte Domains): {'an' if link_on else 'aus'} (klicken zum Umschalten)",
+            emoji="🔗", style=discord.ButtonStyle.success if link_on else discord.ButtonStyle.secondary, row=2,
+            custom_id="setup:toggle:automod_link_filter",
+        )
+        links.callback = self._toggle_links
+        self.add_item(links)
+        self.add_item(BackButton(panel))
+
+    async def _toggle_caps(self, interaction: discord.Interaction):
+        active = self.panel.cog.db.get_bool(interaction.guild_id, "automod_caps")
+        await self.panel.cog.db.set(interaction.guild_id, "automod_caps", not active)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=AutomodView(self.panel))
+
+    async def _toggle_links(self, interaction: discord.Interaction):
+        active = self.panel.cog.db.get_bool(interaction.guild_id, "automod_link_filter")
+        await self.panel.cog.db.set(interaction.guild_id, "automod_link_filter", not active)
+        await interaction.response.edit_message(embed=self.panel.embed(), view=AutomodView(self.panel))
+
+
 class VerifySetupChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, panel: "SettingsPanel"):
         super().__init__(placeholder="Regel-Kanal wählen …", channel_types=[discord.ChannelType.text], row=0,
@@ -954,6 +1029,11 @@ class SettingsPanel(discord.ui.View):
     async def birthday(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.edit_message(view=BirthdayView(self))
 
+    @discord.ui.button(label="Automod", emoji="🧹", style=discord.ButtonStyle.secondary, row=4,
+                       custom_id="setup:open:automod")
+    async def automod(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(view=AutomodView(self))
+
 
 # ---- Verifizierung: Regeln-Panel, das neue Mitglieder erst bestätigen müssen ---------------
 
@@ -1011,6 +1091,16 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         e.add_field(name="Geburtstagsgrüße", value=fmt_channel(guild, birthday_channel) if birthday_channel else "aus")
         voice_xp = db.get_int(guild.id, "voice_xp_per_minute")
         e.add_field(name="Sprachzeit-XP", value=f"{voice_xp} XP/Min." if voice_xp else "aus")
+        automod_bits = []
+        if db.get(guild.id, "automod_banned_words"):
+            automod_bits.append("Wortfilter")
+        if db.get_bool(guild.id, "automod_caps"):
+            automod_bits.append("Großbuchstaben")
+        if db.get_int(guild.id, "automod_emoji_limit"):
+            automod_bits.append("Emoji-Grenze")
+        if db.get_bool(guild.id, "automod_link_filter"):
+            automod_bits.append("Link-Filter")
+        e.add_field(name="Automod", value=", ".join(automod_bits) if automod_bits else "aus")
         e.add_field(name="Willkommenstext", value=db.get(guild.id, "welcome_text", DEFAULT_WELCOME), inline=False)
         return e
 
@@ -1342,6 +1432,31 @@ class Setup(commands.GroupCog, group_name="setup", group_description="Einstellun
         await interaction.response.send_message(
             f"Sprachzeit-XP: {xp} pro Minute." if xp else "Sprachzeit-XP ist aus.", ephemeral=True
         )
+
+    @app_commands.command(name="automod", description="Wortfilter, Großbuchstaben, Emoji-Spam, Link-Filter einstellen")
+    @app_commands.describe(
+        wortfilter="Verbotene Wörter, durch Komma getrennt; leer lassen = unverändert",
+        grossbuchstaben="Nachrichten mit zu vielen Großbuchstaben entfernen",
+        emoji_grenze="Höchstzahl Emojis pro Nachricht (0 = aus); leer lassen = unverändert",
+        link_filter="Nur Links zu erlaubten Domains zulassen",
+        erlaubte_domains="Erlaubte Domains, durch Komma getrennt (nur mit link_filter:True relevant); leer = unverändert",
+    )
+    async def automod_settings(
+        self, interaction: discord.Interaction, wortfilter: str | None = None,
+        grossbuchstaben: bool | None = None, emoji_grenze: app_commands.Range[int, 0, 100] | None = None,
+        link_filter: bool | None = None, erlaubte_domains: str | None = None,
+    ):
+        if wortfilter is not None:
+            await self.db.set(interaction.guild_id, "automod_banned_words", wortfilter or None)
+        if grossbuchstaben is not None:
+            await self.db.set(interaction.guild_id, "automod_caps", grossbuchstaben)
+        if emoji_grenze is not None:
+            await self.db.set(interaction.guild_id, "automod_emoji_limit", emoji_grenze or None)
+        if link_filter is not None:
+            await self.db.set(interaction.guild_id, "automod_link_filter", link_filter)
+        if erlaubte_domains is not None:
+            await self.db.set(interaction.guild_id, "automod_allowed_domains", erlaubte_domains or None)
+        await interaction.response.send_message("Automod-Einstellungen aktualisiert.", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):

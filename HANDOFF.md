@@ -103,9 +103,6 @@ Noch offen:
   (Pillow), `/rangliste`, Level-up-Nachricht, Rollen-Belohnungen, Kanäle/Rollen ohne XP, Admin-XP-Befehle.
   `bot/cogs/voicestats.py` sammelt schon XP/Sekunden in derselben `levels`-Tabelle, Message-XP und
   Rangkarte fehlen noch.
-- **Automod erweitert**: Wortfilter, Großbuchstaben, Emoji-Spam, Link-Filter mit erlaubten Domains,
-  Verstöße als automatische Verwarnung
-- **Giveaways** (Button, Reroll) — Tabellen `giveaways`/`giveaway_entries` schon in `db.py`
 - **Benachrichtigungen: Twitch** — braucht `TWITCH_CLIENT_ID`/`SECRET` (Daves Entscheidung), als
   neuer `Provider` in `bot/notify/` nach demselben Muster wie `youtube.py`
 
@@ -125,6 +122,11 @@ Fertig:
 - **Umfragen** (native Discord-Polls): `bot/cogs/polls.py`, `/umfrage`.
 - **Geburtstage**: `bot/cogs/birthdays.py`, tägl. 9 Uhr Europe/Berlin.
 - **Embed-Ersteller** (Modal): `bot/cogs/embeds.py`, `/embed-erstellen`.
+- **Giveaways**: `bot/cogs/giveaways.py`, `/giveaway-erstellen`, `/giveaway-reroll`.
+- **Automod erweitert**: in `bot/cogs/moderation.py` (dieselbe Spamschutz-Logik erweitert, nicht
+  eigener Cog) — Wortfilter, Großbuchstaben, Emoji-Spam, Link-Filter mit erlaubten Domains, jeder
+  Verstoß zusätzlich als automatische Verwarnung (`add_warning`, vom Bot selbst als Moderator,
+  zählt auch in Richtung der automatischen Strafschwelle). `/setup automod` bzw. im Klick-Panel.
 
 Abhängigkeiten dafür: `pillow`, `tzdata` in requirements.txt ergänzen.
 Discord erlaubt höchstens 100 Top-Level-Slash-Befehle; neue Funktionen als Gruppen anlegen

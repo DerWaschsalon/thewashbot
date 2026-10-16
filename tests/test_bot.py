@@ -53,6 +53,7 @@ def test_all_commands_register():
                      "setup geburtstage", "embed-erstellen", "befehl-erstellen", "befehl-loeschen", "befehle",
                      "ankuendigung-erstellen", "ankuendigungen", "ankuendigung-loeschen",
                      "sprachzeit", "setup sprachzeit-xp", "giveaway-erstellen", "giveaway-reroll",
+                     "setup automod",
                      "vc name", "vc sperren", "aufraeumen nachrichten", "aufraeumen bots", "aufraeumen bericht"]:
         assert expected in names, expected
     # Discord: höchstens 100 Top-Level-Befehle, Namen kleingeschrieben, ≤ 32 Zeichen
@@ -125,11 +126,11 @@ def test_settings_panel_persistent_has_stable_custom_ids():
 
     cog = type("FakeCog", (), {})()
     view = SettingsPanel(cog, guild=object(), persistent=True)
-    assert len(view.children) == 18  # kein Schließen-Button im persistenten Modus
+    assert len(view.children) == 19  # kein Schließen-Button im persistenten Modus
     assert all(item.custom_id for item in view.children)
 
     ephemeral = SettingsPanel(cog, guild=object(), persistent=False)
-    assert len(ephemeral.children) == 19  # inkl. Schließen
+    assert len(ephemeral.children) == 20  # inkl. Schließen
 
 
 def test_reminder_parsing():
@@ -569,7 +570,8 @@ def test_new_panel_subviews_build_without_overflow():
     from pathlib import Path
 
     from bot.cogs.settings import (
-        BirthdayView, BumpView, DashboardRoleView, MemberCountView, SettingsPanel, StarboardView, WarnView, VerifyView,
+        AutomodView, BirthdayView, BumpView, DashboardRoleView, MemberCountView, SettingsPanel, StarboardView,
+        WarnView, VerifyView,
     )
     from bot.db import Database
 
@@ -579,7 +581,7 @@ def test_new_panel_subviews_build_without_overflow():
     panel = SettingsPanel.__new__(SettingsPanel)
     panel.cog, panel.guild, panel.persistent = cog, guild, True
 
-    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView, StarboardView, BirthdayView]:
+    for view_cls in [WarnView, DashboardRoleView, BumpView, MemberCountView, StarboardView, BirthdayView, AutomodView]:
         view = view_cls(panel)
         assert all(item.custom_id for item in view.children)
 
@@ -955,6 +957,62 @@ def test_giveaway_pick_winners_respects_count_and_uses_entries():
 
             no_entries = await cog.pick_winners(100, 2)
             assert no_entries == []
+
+            await db.close()
+
+    run(go())
+
+
+def test_automod_caps_ratio_and_domain_check():
+    from bot.cogs.moderation import caps_ratio, domain_allowed
+
+    assert caps_ratio("HALLO ZUSAMMEN WIE GEHTS") > 0.7
+    assert caps_ratio("Hallo zusammen, wie geht's?") < 0.7
+    assert caps_ratio("AB") == 0.0  # weniger als CAPS_MIN_LETTERS -> gar nicht bewertet
+
+    allowed = {"example.com", "youtube.com"}
+    assert domain_allowed("example.com", allowed) is True
+    assert domain_allowed("sub.example.com", allowed) is True  # Subdomain einer erlaubten Domain
+    assert domain_allowed("evil.com", allowed) is False
+
+
+def test_automod_check_detects_each_violation_independently():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.moderation import Moderation
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+            cog = Moderation.__new__(Moderation)
+            cog.db = db
+
+            def fake_message(content):
+                return type("M", (), {"guild": type("G", (), {"id": 1})(), "content": content})()
+
+            # Nichts eingerichtet -> keine Erkennung
+            assert await cog._check_automod(fake_message("ganz normaler Text")) is None
+
+            await db.set(1, "automod_banned_words", "böses-wort, anderes")
+            assert await cog._check_automod(fake_message("hier kommt ein böses-wort vor")) == "verbotenes Wort"
+            await db.set(1, "automod_banned_words", None)
+
+            await db.set(1, "automod_caps", True)
+            assert await cog._check_automod(fake_message("NUR GROSSBUCHSTABEN HIER DRIN")) == "zu viele Großbuchstaben"
+            await db.set(1, "automod_caps", False)
+
+            await db.set(1, "automod_emoji_limit", 2)
+            assert await cog._check_automod(fake_message("😀😀😀😀")) == "Emoji-Spam"
+            assert await cog._check_automod(fake_message("😀 nur eins")) is None
+            await db.set(1, "automod_emoji_limit", None)
+
+            await db.set(1, "automod_link_filter", True)
+            await db.set(1, "automod_allowed_domains", "example.com")
+            assert await cog._check_automod(fake_message("schau mal https://evil.com/x")) == "nicht erlaubter Link"
+            assert await cog._check_automod(fake_message("schau mal https://example.com/x")) is None
 
             await db.close()
 
