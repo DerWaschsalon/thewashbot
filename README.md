@@ -218,9 +218,14 @@ zu haben.
 
 ## Web-Dashboard einrichten
 
-Einstellungen im Browser statt in Discord, Login mit dem eigenen Discord-Konto. Deckt die
-Einstellungen ab, die einfache Werte sind (Kanäle, Rollen, Texte, An/Aus); den mehrstufigen
-Assistenten für neue GitHub-Benachrichtigungen gibt's bewusst nur in Discord.
+Einstellungen im Browser statt in Discord, Login mit dem eigenen Discord-Konto. Optik angelehnt
+an [DeckBar](https://github.com/gamunex/deckbar) (dunkles „Liquid Glass", blauer Akzent).
+Deckt inzwischen fast alle Bereiche ab: Allgemein, Automod, Verwarnungen, Tickets, Community
+(Zähler/Starboard/Geburtstage/Bump-Erinnerung), Levelsystem, zeitgesteuerte Ankündigungen, eigene
+Befehle, DPS-Webhook, AION-2-Filter, Benachrichtigungen (an/aus/löschen), Sichtbarkeits-Matrix.
+Bewusst nur in Discord: der mehrstufige Assistent für neue Benachrichtigungen, die
+Verifizierungs-Ersteinrichtung (beide wegen Vorschau/Bestätigung), Giveaways (keine
+Schlüssel/Wert-Einstellung) und der Server-Status (braucht den Docker-Socket, nur für `OWNER_ID`).
 
 1. Im Developer Portal unter **OAuth2** → **Redirects** genau diese URL eintragen:
    `http://<DASHBOARD_HOST>:<DASHBOARD_PORT>/callback` (Standard-Port 8789).

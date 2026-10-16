@@ -478,6 +478,32 @@ def test_dashboard_html_escaping():
     assert esc(None) == ""
 
 
+def test_dashboard_channel_checklist():
+    import discord
+
+    from bot.cogs.dashboard import channel_checklist
+
+    class FakeChannel:
+        def __init__(self, id_, name, ctype, position):
+            self.id, self.name, self.type, self.position = id_, name, ctype, position
+
+    class FakeGuild:
+        channels = [
+            FakeChannel(1, "general", discord.ChannelType.text, 0),
+            FakeChannel(2, "<script>", discord.ChannelType.text, 1),
+            FakeChannel(3, "voice-only", discord.ChannelType.voice, 0),
+        ]
+
+    html = channel_checklist(FakeGuild(), "no_xp_channels", selected_ids=[1])
+    assert 'name="no_xp_channels" value="1" checked' in html
+    assert 'name="no_xp_channels" value="2"' in html and "checked" not in html.split('value="2"')[1].split(">")[0]
+    assert "value=\"3\"" not in html  # Sprachkanal, nicht im Text-Checklist
+    assert "&lt;script&gt;" in html and "<script>" not in html  # escaped, kein XSS
+
+    empty = channel_checklist(FakeGuild.__class__("G", (), {"channels": []})(), "x", [])
+    assert "Keine passenden Kanäle" in empty
+
+
 def test_dps_embed():
     from bot.cogs.dps import build_embed
 

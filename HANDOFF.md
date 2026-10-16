@@ -74,12 +74,23 @@ Für Claude Code auf dem Server. Bitte zuerst README.md und diese Datei lesen.
 - **Web-Dashboard**: `bot/cogs/dashboard.py`, eigener aiohttp-Server (Port 8789). Login per
   Discord-OAuth2 (nur Scope `identify`, Rolle wird danach über den Bot selbst geprüft — keine
   weiteren Nutzer-Rechte nötig). Zugriff nur für die per `/setup dashboard` festgelegte Rolle
-  (Fallback: „Server verwalten“). Deckt alle einfachen Schlüssel/Wert-Einstellungen ab
-  (Allgemein, Verifizierung-Text, Tickets, DPS-Webhook, Verwarnungs-Schwelle,
-  Benachrichtigungen an/aus/löschen). Bewusst **nicht** abgedeckt: der mehrstufige
-  GitHub-Benachrichtigungs-Assistent (bleibt in Discord) und die große
-  Verifizierungs-Ersteinrichtung (bleibt `/setup verifizierung` wegen Vorschau/Bestätigung).
-  Sessions nur im Speicher (RAM), gehen bei Neustart verloren.
+  (Fallback: „Server verwalten“). Optik komplett überarbeitet (2026-10-16), angelehnt an DeckBar
+  (`DASHBOARD_CSS` im Modul: dunkler Verlauf, transluzente Karten, blauer Akzent, Pill-Chips statt
+  des alten Discord-blauen Headers). Deckt jetzt praktisch alle Bereiche ab: Allgemein, Automod
+  (neu), Verwarnungen, Tickets, Community (neu: Mitglieder-/Bots-Zähler, Starboard, Geburtstage,
+  Bump-Erinnerung), Levelsystem (neu: an/aus, Announce-Kanal, Voice-XP, Kanäle/Rollen ohne XP,
+  Rollen-Belohnungen), zeitgesteuerte Ankündigungen (neu, volle Liste+Anlegen+Löschen), eigene
+  Befehle (neu, volle Liste+Anlegen+Löschen), DPS-Webhook, AION-2-Filter, Benachrichtigungen
+  (an/aus/löschen), Sichtbarkeits-Matrix. Bewusst **nicht** abgedeckt: der mehrstufige
+  Benachrichtigungs-Assistent (bleibt in Discord), die große Verifizierungs-Ersteinrichtung
+  (bleibt `/setup verifizierung` wegen Vorschau/Bestätigung), Giveaways (keine Schlüssel/Wert-
+  Einstellung) und Server-Status (`OWNER_ID`-only, nicht über die rollenbasierte
+  Dashboard-Berechtigung). Beim Umbau auch einen latenten Bug in den Alt-Seiten „Allgemein" und
+  neu geschriebenen Seiten gefixt: mehrere `<form>`-Tags auf derselben Seite, die alle zum selben
+  Handler posten, haben sich beim Abschicken eines einzelnen Formulars gegenseitig die Felder
+  geleert (Browser schicken nur Felder des abgeschickten `<form>`, der Handler hat aber alle
+  Felder unconditional gesetzt). Jetzt entweder ein gemeinsames `<form>` um mehrere Karten, oder
+  jede Karte mit eigener Route. Sessions nur im Speicher (RAM), gehen bei Neustart verloren.
 
 ## Noch zu bauen (Daves Auswahl)
 

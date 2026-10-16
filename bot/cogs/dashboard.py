@@ -10,10 +10,21 @@ Redis/DB nötig für eine Handvoll gleichzeitiger Logins, geht beim Neustart ver
 neu einloggen). Läuft über HTTP ohne eigenes TLS, daher nur fürs LAN/Tailscale gedacht, nicht fürs
 offene Internet — siehe README.
 
-Deckt die Einstellungen ab, die einfache Schlüssel/Wert-Paare sind. Der mehrstufige Assistent für
-neue GitHub-Benachrichtigungen bleibt bewusst in Discord (siehe bot/cogs/notifications.py) — hier
-gibt's nur Übersicht/An-Aus/Löschen dafür, Neuanlegen wäre als Formular kaum übersichtlicher als
-der bestehende Klick-Assistent.
+Deckt inzwischen praktisch alle Einstellungen ab, die als Formular Sinn ergeben — Allgemein,
+Automod, Verwarnungen, Tickets, Community (Zähler/Starboard/Geburtstage/Bump-Erinnerung),
+Levelsystem, zeitgesteuerte Ankündigungen, eigene Befehle, DPS-Webhook, AION-2-Filter,
+Benachrichtigungen, Sichtbarkeits-Matrix. Bewusst NICHT hier, weiterhin nur in Discord:
+- der mehrstufige Assistent für neue GitHub/YouTube-Benachrichtigungen (hier nur
+  Übersicht/An-Aus/Löschen) und die Verifizierungs-Ersteinrichtung — beide wegen
+  Vorschau/Bestätigung bzw. serverweiter Rechte-Änderungen, die man nicht nebenbei in einem
+  Formular anklicken sollte;
+- Giveaways — laufende Zeitgeber/Teilnehmer sind kein Schlüssel/Wert-Setting;
+- Server-Status (`/server`) — braucht den Docker-Socket, bewusst nur für `OWNER_ID` in Discord,
+  nicht über die rollenbasierte Dashboard-Berechtigung.
+
+Optik angelehnt an DeckBar (github.com/gamunex/deckbar, eigenes Projekt desselben Entwicklers):
+dunkler Verlaufshintergrund, transluzente „Liquid-Glass“-Karten, blauer Akzent, Pill-Chips für
+Status — siehe `DASHBOARD_CSS` unten.
 """
 
 from __future__ import annotations
@@ -54,9 +65,120 @@ def esc(text) -> str:
 
 NAV = [
     ("/", "Übersicht"), ("/general", "Allgemein"), ("/verification", "Verifizierung"),
-    ("/tickets", "Tickets"), ("/dps", "DPS-Webhook"), ("/aion", "AION-2-Filter"), ("/warnings", "Verwarnungen"),
+    ("/automod", "Automod"), ("/warnings", "Verwarnungen"), ("/tickets", "Tickets"),
+    ("/community", "Community"), ("/level", "Levelsystem"), ("/announcements", "Ankündigungen"),
+    ("/commands", "Eigene Befehle"), ("/dps", "DPS-Webhook"), ("/aion", "AION-2-Filter"),
     ("/notifications", "Benachrichtigungen"), ("/matrix", "Sichtbarkeit"),
 ]
+
+# Liquid-Glass-Optik angelehnt an DeckBar (github.com/gamunex/deckbar, daemon/deckbar_daemon/web/style.css):
+# dunkler Verlaufshintergrund, transluzente Karten mit dezentem Rand, blauer Akzent, Pill-Chips.
+DASHBOARD_CSS = """
+:root {
+  --bg: #0b0e1a;
+  --panel: rgba(255, 255, 255, 0.055);
+  --panel-2: rgba(255, 255, 255, 0.09);
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #f2f3f7;
+  --dim: rgba(242, 243, 247, 0.62);
+  --accent: #5ac8fa;
+  --danger: #ff453a;
+  --success: #30d158;
+  --warning: #ff9f0a;
+  --radius: 14px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(900px 400px at 10% -10%, rgba(88, 60, 220, 0.28), transparent 70%),
+    radial-gradient(800px 400px at 100% 0%, rgba(230, 110, 60, 0.18), transparent 70%),
+    var(--bg);
+  color: var(--text);
+  font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100vh;
+}
+h1, h2 { margin: 0; font-weight: 600; }
+h1 { font-size: 20px; letter-spacing: 0.2px; margin-bottom: 18px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--dim); margin-bottom: 14px; }
+
+label { display: block; margin: 14px 0 5px; font-size: 13px; font-weight: 500; color: var(--dim); }
+select, input[type=text], input[type=number], textarea {
+  width: 100%; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--line);
+  border-radius: 9px; padding: 8px 10px; font: inherit; color: inherit; outline: none;
+}
+select:focus, input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(90, 200, 250, 0.18); }
+textarea { min-height: 90px; font-family: inherit; resize: vertical; }
+input[type=checkbox] { width: auto; margin-right: 6px; accent-color: var(--accent); }
+
+.hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
+.hint code { white-space: normal; }
+
+button {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px;
+  padding: 8px 16px; font: inherit; font-weight: 500; cursor: pointer; margin-top: 16px;
+}
+button:hover { background: rgba(255, 255, 255, 0.14); }
+button[type=submit] { background: var(--accent); border-color: transparent; color: #04121a; font-weight: 600; }
+button[type=submit]:hover { filter: brightness(1.08); }
+button.danger { background: rgba(255, 69, 58, 0.16); border-color: var(--danger); color: #ffb4b0; }
+button.danger:hover { background: rgba(255, 69, 58, 0.28); }
+button.secondary { background: transparent; }
+button.cell-btn { background: none; border: none; padding: 2px; margin: 0; font-size: 1.1rem; cursor: pointer; line-height: 1; }
+
+.top {
+  display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-bottom: 1px solid var(--line);
+  background: rgba(10, 12, 24, 0.6); position: sticky; top: 0; z-index: 5; backdrop-filter: blur(14px);
+  flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; white-space: nowrap; }
+.logo { width: 26px; height: 12px; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8f7cff);
+        box-shadow: 0 0 14px rgba(90, 200, 250, 0.5); flex-shrink: 0; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+nav a { color: var(--dim); text-decoration: none; padding: 6px 12px; border-radius: 9px; font-size: 13px; }
+nav a.active, nav a:hover { background: var(--panel-2); color: var(--text); }
+.user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); white-space: nowrap; }
+.user a { color: var(--dim); text-decoration: none; }
+.user a:hover { color: var(--text); }
+
+main { padding: 20px 24px 60px; max-width: 920px; margin: 0 auto; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+.card > button:first-child { margin-top: 0; }
+
+.flash { background: rgba(48, 209, 88, 0.12); border: 1px solid rgba(48, 209, 88, 0.4); color: #8af0a6;
+         padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 16px; }
+
+code { background: rgba(0, 0, 0, 0.3); padding: 2px 6px; border-radius: 6px; font-size: 12px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: none; }
+.row-form { display: inline; }
+
+.checklist { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.checklist label { display: flex; align-items: center; gap: 6px; margin: 0; font-weight: 400; color: var(--text); font-size: 13px; }
+
+table.matrix { white-space: nowrap; }
+table.matrix th, table.matrix td { text-align: center; padding: 4px 8px; }
+table.matrix th:first-child, table.matrix td:first-child { text-align: left; position: sticky; left: 0; background: #11131f; }
+table.matrix form { margin: 0; }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 99px;
+        background: var(--panel-2); border: 1px solid var(--line); color: var(--dim); }
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+.chip.ok .dot { background: var(--success); }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+@media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+
+@media (max-width: 760px) {
+  .top { padding: 12px 16px; }
+  main { padding: 14px 16px 40px; }
+}
+"""
 
 
 def layout(title: str, body: str, *, user: dict | None = None, active: str = "", flash: str = "") -> str:
@@ -66,49 +188,17 @@ def layout(title: str, body: str, *, user: dict | None = None, active: str = "",
     )
     user_html = ""
     if user:
-        user_html = f'<span class="user">{esc(user["name"])}</span> <a href="/logout">Abmelden</a>'
+        user_html = f'<div class="user"><span>{esc(user["name"])}</span><a href="/logout">Abmelden</a></div>'
     flash_html = f'<div class="flash">{esc(flash)}</div>' if flash else ""
     return f"""<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title)} – TheWashBot</title>
-<style>
-  :root {{ color-scheme: light dark; }}
-  body {{ font-family: system-ui, sans-serif; margin: 0; background: #f4f5f7; color: #1a1a1a; }}
-  @media (prefers-color-scheme: dark) {{ body {{ background: #1a1b1e; color: #e4e4e7; }} }}
-  header {{ background: #5865F2; color: #fff; padding: 14px 20px; display: flex; justify-content: space-between;
-            align-items: center; flex-wrap: wrap; gap: 10px; }}
-  header nav a {{ color: #fff; text-decoration: none; margin-right: 14px; padding: 4px 8px; border-radius: 6px; }}
-  header nav a.active, header nav a:hover {{ background: rgba(255,255,255,.2); }}
-  header .user {{ margin-right: 10px; opacity: .9; }}
-  main {{ max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; }}
-  .card {{ background: #fff; border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }}
-  @media (prefers-color-scheme: dark) {{ .card {{ background: #2a2b2f; }} }}
-  h1 {{ font-size: 1.3rem; }} h2 {{ font-size: 1.05rem; margin-top: 0; }}
-  label {{ display: block; margin: 12px 0 4px; font-weight: 600; font-size: .9rem; }}
-  select, input[type=text], textarea {{ width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
-            border: 1px solid #ccc; font-size: .95rem; background: transparent; color: inherit; }}
-  textarea {{ min-height: 90px; font-family: inherit; }}
-  .hint {{ font-size: .8rem; opacity: .7; margin-top: 2px; }}
-  button {{ background: #5865F2; color: #fff; border: none; padding: 9px 18px; border-radius: 6px; font-size: .9rem;
-            cursor: pointer; margin-top: 14px; }}
-  button.danger {{ background: #ed4245; }}
-  button.secondary {{ background: #6b7280; }}
-  .flash {{ background: #d1fae5; color: #065f46; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; }}
-  @media (prefers-color-scheme: dark) {{ .flash {{ background: #064e3b; color: #a7f3d0; }} }}
-  table {{ width: 100%; border-collapse: collapse; font-size: .9rem; }}
-  td, th {{ text-align: left; padding: 6px 4px; border-bottom: 1px solid rgba(128,128,128,.25); }}
-  .row-form {{ display: inline; }}
-  code {{ background: rgba(128,128,128,.15); padding: 2px 5px; border-radius: 4px; }}
-  .checklist label {{ font-weight: 400; display: flex; align-items: center; gap: 6px; margin: 4px 0; }}
-  table.matrix {{ white-space: nowrap; }}
-  table.matrix th, table.matrix td {{ text-align: center; padding: 3px 6px; }}
-  table.matrix th:first-child, table.matrix td:first-child {{ text-align: left; position: sticky; left: 0;
-            background: inherit; }}
-  table.matrix form {{ margin: 0; }}
-  button.cell-btn {{ background: none; border: none; padding: 2px; margin: 0; font-size: 1.1rem; cursor: pointer;
-            line-height: 1; }}
-</style></head><body>
-<header><div><strong>🧺 TheWashBot</strong></div><nav>{nav_html}</nav><div>{user_html}</div></header>
+<style>{DASHBOARD_CSS}</style></head><body>
+<div class="top">
+  <div class="brand"><span class="logo"></span>TheWashBot</div>
+  <nav>{nav_html}</nav>
+  {user_html}
+</div>
 <main>{flash_html}<h1>{esc(title)}</h1>{body}</main>
 </body></html>"""
 
@@ -135,6 +225,16 @@ def role_checklist(guild: discord.Guild, name: str, selected_ids: list[int]) -> 
         checked = " checked" if r.id in selected_ids else ""
         rows.append(f'<label><input type="checkbox" name="{name}" value="{r.id}"{checked}> {esc(r.name)}</label>')
     return f'<div class="checklist">{"".join(rows)}</div>'
+
+
+def channel_checklist(guild: discord.Guild, name: str, selected_ids: list[int],
+                      *, types=(discord.ChannelType.text,)) -> str:
+    rows = []
+    for ch in sorted((c for c in guild.channels if c.type in types), key=lambda c: c.position):
+        checked = " checked" if ch.id in selected_ids else ""
+        rows.append(f'<label><input type="checkbox" name="{name}" value="{ch.id}"{checked}> #{esc(ch.name)}</label>')
+    inner = "".join(rows) or '<span class="hint">Keine passenden Kanäle vorhanden.</span>'
+    return f'<div class="checklist">{inner}</div>'
 
 
 def visible_roles(guild: discord.Guild) -> list[discord.Role]:
@@ -178,6 +278,18 @@ class Dashboard(commands.Cog):
             web.get("/aion", self.page_aion), web.post("/aion", self.post_aion),
             web.post("/aion/token", self.post_aion_token),
             web.get("/warnings", self.page_warnings), web.post("/warnings", self.post_warnings),
+            web.get("/automod", self.page_automod), web.post("/automod", self.post_automod),
+            web.get("/community", self.page_community), web.post("/community", self.post_community),
+            web.get("/level", self.page_level), web.post("/level", self.post_level),
+            web.post("/level/no-xp", self.post_level_no_xp),
+            web.post("/level/reward/add", self.post_level_reward_add),
+            web.post("/level/reward/{level}/delete", self.post_level_reward_delete),
+            web.get("/announcements", self.page_announcements),
+            web.post("/announcements/add", self.post_announcement_add),
+            web.post("/announcements/{id}/delete", self.post_announcement_delete),
+            web.get("/commands", self.page_commands),
+            web.post("/commands/add", self.post_command_add),
+            web.post("/commands/{name}/delete", self.post_command_delete),
             web.get("/notifications", self.page_notifications),
             web.post("/notifications/{id}/toggle", self.post_notification_toggle),
             web.post("/notifications/{id}/delete", self.post_notification_delete),
@@ -329,13 +441,6 @@ class Dashboard(commands.Cog):
             return result
         _, guild = result
         db = self.db
-        rows = [
-            ("Log-Kanal", db.get_int(guild.id, "log_channel")),
-            ("Willkommenskanal", db.get_int(guild.id, "welcome_channel")),
-            ("Autorolle", db.get_int(guild.id, "autorole")),
-            ("Temp-Voice", db.get_int(guild.id, "tempvoice_hub")),
-            ("DJ-Rolle", db.get_int(guild.id, "dj_role")),
-        ]
 
         def fmt(v):
             if not v:
@@ -346,14 +451,38 @@ class Dashboard(commands.Cog):
             role = guild.get_role(v)
             return esc(role.name) if role else f"({v})"
 
-        body = '<div class="card"><table>' + "".join(
-            f"<tr><td>{esc(label)}</td><td>{fmt(value)}</td></tr>" for label, value in rows
+        def onoff(flag: bool) -> str:
+            return '<span class="chip ok"><span class="dot"></span>an</span>' if flag else \
+                '<span class="chip"><span class="dot"></span>aus</span>'
+
+        chips = (
+            f'<span class="chip ok"><span class="dot"></span>{esc(guild.name)}</span>'
+            f'<span class="chip ok"><span class="dot"></span>{len(guild.members)} Mitglieder</span>'
+        )
+        rows = [
+            ("Log-Kanal", fmt(db.get_int(guild.id, "log_channel"))),
+            ("Willkommenskanal", fmt(db.get_int(guild.id, "welcome_channel"))),
+            ("Autorolle", fmt(db.get_int(guild.id, "autorole"))),
+            ("Temp-Voice", fmt(db.get_int(guild.id, "tempvoice_hub"))),
+            ("DJ-Rolle", fmt(db.get_int(guild.id, "dj_role"))),
+            ("Automod", onoff(bool(db.get(guild.id, "automod_banned_words")) or db.get_bool(guild.id, "automod_caps")
+                              or db.get_bool(guild.id, "automod_link_filter") or bool(db.get_int(guild.id, "automod_emoji_limit")))),
+            ("Levelsystem", onoff(db.get_bool(guild.id, "level_system_enabled"))),
+            ("Starboard", fmt(db.get_int(guild.id, "starboard_channel"))),
+            ("Bump-Erinnerung", fmt(db.get_int(guild.id, "bump_channel"))),
+            ("Geburtstage", fmt(db.get_int(guild.id, "birthday_channel"))),
+        ]
+        body = f'<div class="chips" style="margin-bottom:16px">{chips}</div>'
+        body += '<div class="card"><table>' + "".join(
+            f"<tr><td>{esc(label)}</td><td>{value}</td></tr>" for label, value in rows
         ) + "</table></div>"
         body += (
             '<div class="card"><h2>Hallo 👋</h2><p>Links oben die Bereiche. Neue '
-            "GitHub-Benachrichtigungen legst du weiterhin direkt in Discord an "
+            "GitHub-/YouTube-Benachrichtigungen legst du weiterhin direkt in Discord an "
             '(🔔-Button im Einstellungen-Kanal) — hier kannst du bestehende an/ausschalten oder '
-            "löschen.</p></div>"
+            "löschen. Giveaways, der Server-Status und die Verifizierungs-Ersteinrichtung bleiben "
+            "ebenfalls in Discord, wegen Vorschau/Bestätigung bzw. weil sie Root-Zugriff auf den "
+            "Server brauchen.</p></div>"
         )
         return web.Response(
             text=layout("Übersicht", body, user=self._user_ctx(request), active="/", flash=self._flash(request)),
@@ -369,16 +498,16 @@ class Dashboard(commands.Cog):
         _, guild = result
         db = self.db
         body = f"""
-<form method="post" class="card">
+<form method="post">
+<div class="card">
   <h2>Moderation</h2>
   <label>Log-Kanal</label>
   <select name="log_channel">{channel_options(guild, db.get_int(guild.id, "log_channel"))}</select>
   <div class="hint">Gelöschte/bearbeitete Nachrichten, Beitritte, Bans, …</div>
   <label><input type="checkbox" name="antispam" {"checked" if db.get_bool(guild.id, "antispam", True) else ""}> Spamschutz aktiv</label>
   <label><input type="checkbox" name="allow_invites" {"checked" if db.get_bool(guild.id, "allow_invites") else ""}> Einladungslinks erlauben</label>
-  <button type="submit">Speichern</button>
-</form>
-<form method="post" class="card">
+</div>
+<div class="card">
   <h2>Willkommen</h2>
   <label>Willkommenskanal</label>
   <select name="welcome_channel">{channel_options(guild, db.get_int(guild.id, "welcome_channel"))}</select>
@@ -387,9 +516,8 @@ class Dashboard(commands.Cog):
   <div class="hint">Platzhalter: <code>{{user}}</code> <code>{{name}}</code> <code>{{server}}</code> <code>{{anzahl}}</code></div>
   <label>Autorolle (z. B. „Neuling“, sofort bei Beitritt)</label>
   <select name="autorole">{role_options(guild, db.get_int(guild.id, "autorole"))}</select>
-  <button type="submit">Speichern</button>
-</form>
-<form method="post" class="card">
+</div>
+<div class="card">
   <h2>Musik &amp; Voice</h2>
   <label>DJ-Rolle (leer = alle dürfen steuern)</label>
   <select name="dj_role">{role_options(guild, db.get_int(guild.id, "dj_role"))}</select>
@@ -397,6 +525,7 @@ class Dashboard(commands.Cog):
   <select name="tempvoice_hub">{channel_options(guild, db.get_int(guild.id, "tempvoice_hub"), types=(discord.ChannelType.voice,))}</select>
   <div class="hint">Neu anlegen/ändern geht genauer per <code>/setup temp-voice</code> in Discord.</div>
   <button type="submit">Speichern</button>
+</div>
 </form>"""
         return web.Response(
             text=layout("Allgemein", body, user=self._user_ctx(request), active="/general", flash=self._flash(request)),
@@ -636,6 +765,390 @@ class Dashboard(commands.Cog):
             await self.db.set(guild.id, "warn_threshold", threshold)
             await self.db.set(guild.id, "warn_action", str(form.get("action") or "timeout"))
         return self._redirect("/warnings", "Gespeichert.")
+
+    # ---- Automod ---------------------------------------------------------------------------------
+
+    async def page_automod(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        db = self.db
+        body = f"""
+<form method="post">
+<div class="card">
+  <h2>Wortfilter &amp; Links</h2>
+  <label>Verbotene Wörter (durch Komma getrennt)</label>
+  <textarea name="banned_words">{esc(db.get(guild.id, "automod_banned_words", ""))}</textarea>
+  <label><input type="checkbox" name="link_filter" {"checked" if db.get_bool(guild.id, "automod_link_filter") else ""}> Nur Links zu erlaubten Domains zulassen</label>
+  <label>Erlaubte Domains (durch Komma getrennt)</label>
+  <textarea name="allowed_domains">{esc(db.get(guild.id, "automod_allowed_domains", ""))}</textarea>
+</div>
+<div class="card">
+  <h2>Großbuchstaben &amp; Emoji-Spam</h2>
+  <label><input type="checkbox" name="caps" {"checked" if db.get_bool(guild.id, "automod_caps") else ""}> Nachrichten mit zu vielen Großbuchstaben entfernen</label>
+  <label>Emoji-Grenze pro Nachricht (0 = aus)</label>
+  <input type="number" min="0" name="emoji_limit" value="{db.get_int(guild.id, 'automod_emoji_limit') or 0}">
+  <button type="submit">Speichern</button>
+</div>
+</form>
+<div class="card hint">Jeder Automod-Verstoß zählt zusätzlich als automatische Verwarnung (zählt in
+  Richtung der Schwelle unter „Verwarnungen“) — Moderator ist dann der Bot selbst.</div>"""
+        return web.Response(
+            text=layout("Automod", body, user=self._user_ctx(request), active="/automod", flash=self._flash(request)),
+            content_type="text/html",
+        )
+
+    async def post_automod(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        await self.db.set(guild.id, "automod_banned_words", str(form.get("banned_words") or "").strip() or None)
+        await self.db.set(guild.id, "automod_link_filter", "link_filter" in form)
+        await self.db.set(guild.id, "automod_allowed_domains", str(form.get("allowed_domains") or "").strip() or None)
+        await self.db.set(guild.id, "automod_caps", "caps" in form)
+        try:
+            emoji_limit = max(0, int(form.get("emoji_limit") or 0))
+        except ValueError:
+            emoji_limit = 0
+        await self.db.set(guild.id, "automod_emoji_limit", emoji_limit or None)
+        return self._redirect("/automod", "Gespeichert.")
+
+    # ---- Community: Zähler, Starboard, Geburtstage, Bump-Erinnerung ------------------------------
+
+    async def page_community(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        db = self.db
+        body = f"""
+<form method="post">
+<div class="card">
+  <h2>Statistik-Kanäle</h2>
+  <div class="grid2">
+    <div>
+      <label>Mitglieder-Zähler (Sprachkanal)</label>
+      <select name="member_count_channel">{channel_options(guild, db.get_int(guild.id, "member_count_channel"), types=(discord.ChannelType.voice,))}</select>
+    </div>
+    <div>
+      <label>Bots-Zähler (Sprachkanal)</label>
+      <select name="bots_count_channel">{channel_options(guild, db.get_int(guild.id, "bots_count_channel"), types=(discord.ChannelType.voice,))}</select>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <h2>Starboard</h2>
+  <div class="grid2">
+    <div>
+      <label>Highlight-Kanal</label>
+      <select name="starboard_channel">{channel_options(guild, db.get_int(guild.id, "starboard_channel"))}</select>
+    </div>
+    <div>
+      <label>Schwelle (⭐, ohne den Stern des Autors)</label>
+      <input type="number" min="1" name="starboard_threshold" value="{db.get_int(guild.id, 'starboard_threshold') or 3}">
+    </div>
+  </div>
+</div>
+<div class="card">
+  <h2>Geburtstage</h2>
+  <label>Kanal für die tägliche Gratulation (9 Uhr)</label>
+  <select name="birthday_channel">{channel_options(guild, db.get_int(guild.id, "birthday_channel"))}</select>
+  <div class="hint">Mitglieder tragen ihren eigenen Geburtstag per <code>/geburtstag-setzen</code> ein.</div>
+</div>
+<div class="card">
+  <h2>Bump-Erinnerung (Disboard)</h2>
+  <div class="grid2">
+    <div>
+      <label>Kanal, in dem ihr <code>/bump</code> nutzt</label>
+      <select name="bump_channel">{channel_options(guild, db.get_int(guild.id, "bump_channel"))}</select>
+    </div>
+    <div>
+      <label>Rolle, die gepingt wird (optional)</label>
+      <select name="bump_role">{role_options(guild, db.get_int(guild.id, "bump_role"))}</select>
+    </div>
+  </div>
+  <button type="submit">Speichern</button>
+</div>
+</form>"""
+        return web.Response(
+            text=layout("Community", body, user=self._user_ctx(request), active="/community", flash=self._flash(request)),
+            content_type="text/html",
+        )
+
+    async def post_community(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        await self.db.set(guild.id, "member_count_channel", form.get("member_count_channel") or None)
+        await self.db.set(guild.id, "bots_count_channel", form.get("bots_count_channel") or None)
+        await self.db.set(guild.id, "starboard_channel", form.get("starboard_channel") or None)
+        try:
+            starboard_threshold = max(1, int(form.get("starboard_threshold") or 3))
+        except ValueError:
+            starboard_threshold = 3
+        await self.db.set(guild.id, "starboard_threshold", starboard_threshold)
+        await self.db.set(guild.id, "birthday_channel", form.get("birthday_channel") or None)
+        await self.db.set(guild.id, "bump_channel", form.get("bump_channel") or None)
+        await self.db.set(guild.id, "bump_role", form.get("bump_role") or None)
+        stats_cog = self.bot.get_cog("Stats")
+        if stats_cog:
+            await stats_cog.update_guild(guild)
+        return self._redirect("/community", "Gespeichert.")
+
+    # ---- Levelsystem -------------------------------------------------------------------------------
+
+    async def page_level(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        db = self.db
+        rewards = await self.db.fetchall(
+            "SELECT level, role_id FROM level_rewards WHERE guild_id=? ORDER BY level", (guild.id,)
+        )
+        def reward_role_name(role_id: int) -> str:
+            role = guild.get_role(role_id)
+            return esc(role.name) if role else "(gelöscht)"
+
+        reward_rows = "".join(
+            f"""<tr><td>{r['level']}</td><td>{reward_role_name(r['role_id'])}</td>
+  <td><form class="row-form" method="post" action="/level/reward/{r['level']}/delete"
+        onsubmit="return confirm('Belohnung für Level {r['level']} löschen?')">
+    <button type="submit" class="danger">Löschen</button></form></td></tr>"""
+            for r in rewards
+        ) or '<tr><td colspan="3" class="hint">Noch keine Rollen-Belohnungen.</td></tr>'
+        no_xp_channels = db.get_ids(guild.id, "level_no_xp_channels")
+        no_xp_roles = db.get_ids(guild.id, "level_no_xp_roles")
+        body = f"""
+<form method="post" class="card">
+  <h2>Grundeinstellungen</h2>
+  <label><input type="checkbox" name="enabled" {"checked" if db.get_bool(guild.id, "level_system_enabled") else ""}> Levelsystem an</label>
+  <div class="grid2">
+    <div>
+      <label>Kanal für Level-Up-Nachrichten (leer = im Nachrichten-Kanal)</label>
+      <select name="announce_channel">{channel_options(guild, db.get_int(guild.id, "level_announce_channel"))}</select>
+    </div>
+    <div>
+      <label>XP pro Minute Sprachzeit (0 = aus)</label>
+      <input type="number" min="0" name="voice_xp" value="{db.get_int(guild.id, 'voice_xp_per_minute') or 0}">
+    </div>
+  </div>
+  <button type="submit">Speichern</button>
+</form>
+<form method="post" action="/level/no-xp" class="card">
+  <h2>Kanäle &amp; Rollen ohne XP</h2>
+  <label>Kanäle</label>
+  {channel_checklist(guild, "no_xp_channels", no_xp_channels)}
+  <label>Rollen</label>
+  {role_checklist(guild, "no_xp_roles", no_xp_roles)}
+  <button type="submit">Speichern</button>
+</form>
+<div class="card">
+  <h2>Rollen-Belohnungen (kumulativ)</h2>
+  <table><tr><th>Level</th><th>Rolle</th><th></th></tr>{reward_rows}</table>
+  <form method="post" action="/level/reward/add" class="grid2">
+    <div><label>Ab Level</label><input type="number" min="1" name="level" required></div>
+    <div><label>Rolle</label><select name="role">{role_options(guild, None)}</select></div>
+    <button type="submit">Hinzufügen</button>
+  </form>
+</div>"""
+        return web.Response(
+            text=layout("Levelsystem", body, user=self._user_ctx(request), active="/level", flash=self._flash(request)),
+            content_type="text/html",
+        )
+
+    async def post_level(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        await self.db.set(guild.id, "level_system_enabled", "enabled" in form)
+        await self.db.set(guild.id, "level_announce_channel", form.get("announce_channel") or None)
+        try:
+            voice_xp = max(0, int(form.get("voice_xp") or 0))
+        except ValueError:
+            voice_xp = 0
+        await self.db.set(guild.id, "voice_xp_per_minute", voice_xp or None)
+        return self._redirect("/level", "Gespeichert.")
+
+    async def post_level_no_xp(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        await self.db.set(guild.id, "level_no_xp_channels", ",".join(form.getall("no_xp_channels", [])) or None)
+        await self.db.set(guild.id, "level_no_xp_roles", ",".join(form.getall("no_xp_roles", [])) or None)
+        return self._redirect("/level", "Gespeichert.")
+
+    async def post_level_reward_add(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        try:
+            level = int(form.get("level") or 0)
+        except ValueError:
+            level = 0
+        role_id = form.get("role")
+        if level < 1 or not role_id:
+            return self._redirect("/level", "Level und Rolle angeben.")
+        role = guild.get_role(int(role_id))
+        if role and (role.managed or role >= guild.me.top_role):
+            return self._redirect("/level", f"{role.name} kann ich nicht vergeben (muss unter meiner eigenen Rolle stehen).")
+        await self.db.execute(
+            "INSERT INTO level_rewards (guild_id, level, role_id) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, level) DO UPDATE SET role_id=excluded.role_id",
+            (guild.id, level, int(role_id)),
+        )
+        return self._redirect("/level", "Belohnung gespeichert.")
+
+    async def post_level_reward_delete(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        level = int(request.match_info["level"])
+        await self.db.execute("DELETE FROM level_rewards WHERE guild_id=? AND level=?", (guild.id, level))
+        return self._redirect("/level", "Belohnung gelöscht.")
+
+    # ---- Zeitgesteuerte Ankündigungen ---------------------------------------------------------
+
+    async def page_announcements(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        rows = await self.db.fetchall(
+            "SELECT id, channel_id, text, interval_minutes FROM scheduled WHERE guild_id=? ORDER BY id", (guild.id,)
+        )
+        table_rows = "".join(
+            f"""<tr><td>{("#" + esc(guild.get_channel(r['channel_id']).name)) if guild.get_channel(r['channel_id']) else "–"}</td>
+  <td>{esc(r['text'][:80])}</td><td>alle {r['interval_minutes']} Min.</td>
+  <td><form class="row-form" method="post" action="/announcements/{r['id']}/delete"
+        onsubmit="return confirm('Ankündigung löschen?')"><button type="submit" class="danger">Löschen</button></form></td></tr>"""
+            for r in rows
+        ) or '<tr><td colspan="4" class="hint">Noch keine Ankündigung eingerichtet.</td></tr>'
+        body = f"""
+<div class="card">
+  <h2>Eingerichtet</h2>
+  <table><tr><th>Kanal</th><th>Text</th><th>Intervall</th><th></th></tr>{table_rows}</table>
+</div>
+<form method="post" action="/announcements/add" class="card">
+  <h2>Neu anlegen</h2>
+  <label>Kanal</label>
+  <select name="channel">{channel_options(guild, None)}</select>
+  <label>Text</label>
+  <textarea name="text" required></textarea>
+  <label>Intervall (Minuten, mindestens 5)</label>
+  <input type="number" min="5" name="interval" value="60" required>
+  <button type="submit">Anlegen</button>
+</form>"""
+        return web.Response(
+            text=layout("Ankündigungen", body, user=self._user_ctx(request), active="/announcements",
+                        flash=self._flash(request)),
+            content_type="text/html",
+        )
+
+    async def post_announcement_add(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        channel_id = form.get("channel")
+        text = str(form.get("text") or "").strip()
+        if not channel_id or not text:
+            return self._redirect("/announcements", "Kanal und Text angeben.")
+        try:
+            interval = max(5, int(form.get("interval") or 60))
+        except ValueError:
+            interval = 60
+        await self.db.execute(
+            "INSERT INTO scheduled (guild_id, channel_id, text, interval_minutes, next_run) VALUES (?, ?, ?, ?, ?)",
+            (guild.id, int(channel_id), text, interval, time.time()),
+        )
+        return self._redirect("/announcements", "Angelegt.")
+
+    async def post_announcement_delete(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        ann_id = int(request.match_info["id"])
+        await self.db.execute("DELETE FROM scheduled WHERE id=? AND guild_id=?", (ann_id, guild.id))
+        return self._redirect("/announcements", "Gelöscht.")
+
+    # ---- Eigene Befehle ------------------------------------------------------------------------
+
+    async def page_commands(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        rows = await self.db.fetchall(
+            "SELECT name, response FROM custom_commands WHERE guild_id=? ORDER BY name", (guild.id,)
+        )
+        table_rows = "".join(
+            f"""<tr><td><code>!{esc(r['name'])}</code></td><td>{esc(r['response'][:80])}</td>
+  <td><form class="row-form" method="post" action="/commands/{urllib.parse.quote(r['name'])}/delete"
+        onsubmit="return confirm('!{esc(r['name'])} löschen?')"><button type="submit" class="danger">Löschen</button></form></td></tr>"""
+            for r in rows
+        ) or '<tr><td colspan="3" class="hint">Noch keine eigenen Befehle.</td></tr>'
+        body = f"""
+<div class="card">
+  <h2>Eingerichtet</h2>
+  <table><tr><th>Befehl</th><th>Antwort</th><th></th></tr>{table_rows}</table>
+</div>
+<form method="post" action="/commands/add" class="card">
+  <h2>Neu anlegen (überschreibt einen gleichnamigen Befehl)</h2>
+  <label>Name (ohne „!“)</label>
+  <input type="text" name="name" pattern="[a-z0-9_-]{{1,32}}" required>
+  <label>Antwort</label>
+  <textarea name="response" required></textarea>
+  <div class="hint">Platzhalter: <code>{{user}}</code> (Erwähnung), <code>{{server}}</code></div>
+  <button type="submit">Speichern</button>
+</form>"""
+        return web.Response(
+            text=layout("Eigene Befehle", body, user=self._user_ctx(request), active="/commands",
+                        flash=self._flash(request)),
+            content_type="text/html",
+        )
+
+    async def post_command_add(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        form = await request.post()
+        name = str(form.get("name") or "").strip().lower().lstrip("!")
+        response = str(form.get("response") or "").strip()
+        import re
+
+        if not re.match(r"^[a-z0-9_-]{1,32}$", name) or not response:
+            return self._redirect("/commands", "Ungültiger Name oder leere Antwort.")
+        await self.db.execute(
+            "INSERT INTO custom_commands (guild_id, name, response) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, name) DO UPDATE SET response=excluded.response",
+            (guild.id, name, response),
+        )
+        return self._redirect("/commands", f"!{name} gespeichert.")
+
+    async def post_command_delete(self, request: web.Request) -> web.Response:
+        result = await self.require_admin(request)
+        if isinstance(result, web.Response):
+            return result
+        _, guild = result
+        name = urllib.parse.unquote(request.match_info["name"])
+        await self.db.execute("DELETE FROM custom_commands WHERE guild_id=? AND name=?", (guild.id, name))
+        return self._redirect("/commands", "Gelöscht.")
 
     # ---- Benachrichtigungen --------------------------------------------------------------------
 

@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS giveaways (
 CREATE TABLE IF NOT EXISTS giveaway_entries (
     message_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (message_id, user_id)
 );
--- Listen, die auch im Dashboard bearbeitet werden (siehe schema.LISTS)
+-- Eigene Befehle, auch im Web-Dashboard bearbeitbar (siehe bot/cogs/dashboard.py, Seite /commands)
 CREATE TABLE IF NOT EXISTS custom_commands (
     id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, name TEXT NOT NULL, response TEXT NOT NULL,
     UNIQUE (guild_id, name)
