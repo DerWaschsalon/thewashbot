@@ -185,17 +185,25 @@ JS-Bundle der Seite ausgelesen) liefert pro Kampf eine volle Hit-für-Hit-Zeitle
 (`bossTimeline.events`: `timeMs`, `playerId`, `skillCode`, `damage`, Crit-/Front-Flags). Als Vorbild
 für unsere eigene, einfachere Version genommen.
 
-- `bot/cogs/aion_dedup.py`: `validate_fight_payload` akzeptiert jetzt optional `timeline` (siehe
-  oben), `pick_best_timeline()` wählt bei mehreren Meldungen die mit den meisten Einträgen (keine
-  Event-genaue Fusion mehrerer unabhängiger Mitschnitte), `bucket_dps()`/`timeline_stats()`
-  bauen die Diagramm-Daten bzw. Crit-/Back-Attack-Statistik. `_store_run()` schreibt die
-  (potenziell mehrere MB große) Zeitleiste als Datei unter `<DB_PATH-Ordner>/runs/<id>.json`
-  (Index in der neuen Tabelle `aion_runs`), `cleanup_runs` räumt nach 30 Tagen auf
-  (`RUN_RETENTION_DAYS`). `build_run_embed()` postet bei vorhandener Zeitleiste zusätzlich ein
-  Feld „📊 Analyse" mit dem Link.
+- `bot/cogs/aion_dedup.py`: `validate_fight_payload` akzeptiert jetzt optional `timeline`,
+  `players_meta`, `boss_hp`, `heals` (siehe Payload-Beispiel oben). `pick_best_list(reports, key)`
+  wählt bei mehreren Meldungen pro Liste die mit den meisten Einträgen (keine Event-genaue Fusion
+  mehrerer unabhängiger Mitschnitte). `bucket_dps()`/`timeline_stats()` (inkl. Perfect-/Double-
+  Rate)/`skill_breakdown()`/`boss_hp_series()`/`heals_summary()` bauen die Diagramm-/Tabellen-Daten.
+  `_store_run()` schreibt alles (potenziell mehrere MB) als Datei unter
+  `<DB_PATH-Ordner>/runs/<id>.json` (Index in der neuen Tabelle `aion_runs`), `cleanup_runs` räumt
+  nach 30 Tagen auf (`RUN_RETENTION_DAYS`). `build_run_embed()` postet bei vorhandener Zeitleiste
+  zusätzlich ein Feld „📊 Analyse" mit dem Link.
 - `bot/cogs/dashboard.py`: neue **öffentliche** Route `/runs/{id}` (bewusst ohne Discord-Login —
-  der Link kommt aus dem Discord-Post, soll ohne Umweg öffnen, wie AbyssLogs' geteilte Logs),
-  zeigt Schaden/DPS pro Spieler und Boss als Balken, bei vorhandener Zeitleiste zusätzlich ein
-  DPS-über-Zeit-Diagramm (Chart.js von cdnjs, nur auf dieser Seite geladen) und die
-  Trefferstatistik. `client_max_size` der Dashboard-App auf 25 MB angehoben (Standard wäre 1 MB,
-  reicht für größere Zeitleisten nicht).
+  der Link kommt aus dem Discord-Post, soll ohne Umweg öffnen, wie AbyssLogs' geteilte Logs).
+  Zeigt Schaden/DPS pro Spieler (mit Klasse/Ausrüstung aus `players_meta`, falls vorhanden) und
+  pro Boss als Balken; bei vorhandener Zeitleiste zusätzlich DPS-über-Zeit-Diagramm,
+  Trefferstatistik (Crit-/Back-Attack-/Perfect-/Double-Rate) und eine aufklappbare
+  Skill-Aufschlüsselung pro Spieler; bei `boss_hp` eine HP-über-Zeit-Kurve (Berserk-Zeitpunkt
+  erkennbar); bei `heals` eine Heilungsübersicht. Alle vier Zusatzfelder sind unabhängig
+  voneinander nutzbar — DeckBar kann sie einzeln nachrüsten, nichts davon ist Voraussetzung für
+  ein anderes. Chart.js von cdnjs, nur auf dieser Seite geladen. `client_max_size` der
+  Dashboard-App auf 25 MB angehoben (Standard wäre 1 MB, reicht für größere Zeitleisten nicht).
+- Getestet (2026-10-20) mit echten Kampfdaten von AbyssLogs (ein öffentliches Beispiel, keine
+  eigenen Spielerdaten) als Test-Payload gegen den echten `/api/aion/fight`-Endpunkt auf
+  unraid-server — Discord-Post inkl. Analyse-Link und die Seite selbst funktionieren.

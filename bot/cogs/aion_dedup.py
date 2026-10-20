@@ -29,17 +29,32 @@ Zwei unabhängige Wege, je nachdem ob DeckBar selbst geändert wurde:
          ],
          "timeline": [                                        # optional, für die Analyse-Seite
            {"t_ms": 1234, "player": "ReZero", "skill": "Arrow of Reckoning",
-            "damage": 41200, "crit": true, "back": false},
+            "damage": 41200, "crit": true, "back": false, "perfect": false, "double": false},
            …
+         ],
+         "players_meta": [                                    # optional, Klasse/Ausrüstung
+           {"name": "ReZero", "class": "Ranger", "gear_score": 2850, "combat_power": 12500}, …
+         ],
+         "boss_hp": [                                          # optional, für die HP-Kurve
+           {"t_ms": 0, "hp_pct": 100.0}, {"t_ms": 5000, "hp_pct": 92.3}, …
+         ],
+         "heals": [                                            # optional, Heilungs-Übersicht
+           {"t_ms": 1234, "player": "Priest1", "target": "ReZero", "amount": 8200}, …
          ]
        }
 
    Mit `timeline` postet der Bot zusätzlich einen Link auf eine eigene Analyse-Seite
-   (`/runs/<id>` im Web-Dashboard, siehe `bot/cogs/dashboard.py`) mit DPS-über-Zeit-Diagramm und
-   Trefferstatistik (Crit-/Back-Attack-Rate) — ohne `timeline` nur die Rangliste wie bisher.
-   `player` muss zu einem Namen in `players[]` passen, `skill`/`crit`/`back` sind optional.
-   Kommen mehrere Meldungen für denselben Lauf (mehrere Mitspieler), wird die Zeitleiste mit den
-   meisten Einträgen genommen, nicht mehrere unabhängige Mitschnitte event-genau zusammengeführt.
+   (`/runs/<id>` im Web-Dashboard, siehe `bot/cogs/dashboard.py`, Optik/Umfang an AbyssLogs
+   angelehnt) mit Skill-Aufschlüsselung pro Spieler, DPS-über-Zeit-Diagramm, Trefferstatistik
+   (Crit-/Back-Attack-/Perfect-/Double-Rate), und — soweit mitgeschickt — Klasse/Ausrüstung,
+   Boss-HP-Kurve (Berserk-Zeitpunkt) und Heilungsübersicht. Ohne `timeline` nur die Rangliste wie
+   bisher. `player` muss zu einem Namen in `players[]` passen; `skill`/`crit`/`back`/`perfect`/
+   `double` sowie die drei weiteren Felder sind alle optional und unabhängig voneinander nutzbar.
+   `skill` idealerweise schon als lesbarer Name (wie `boss_name_en`/`dungeon_parts_en` bei den
+   anderen Feldern), nicht als Zahlencode — ohne eigene Skill-Datenbank kann der Bot Codes nicht
+   auflösen. Kommen mehrere Meldungen für denselben Lauf (mehrere Mitspieler), wird jeweils die
+   Liste mit den meisten Einträgen genommen, nicht mehrere unabhängige Mitschnitte
+   event-genau zusammengeführt.
 """
 
 from __future__ import annotations
@@ -171,6 +186,33 @@ def validate_fight_payload(data: dict) -> str | None:
                 return "timeline[].player fehlt"
             if not isinstance(ev.get("damage"), (int, float)):
                 return "timeline[].damage fehlt oder ist keine Zahl"
+    players_meta = data.get("players_meta")
+    if players_meta is not None:
+        if not isinstance(players_meta, list):
+            return "players_meta muss eine Liste sein"
+        for pm in players_meta:
+            if not isinstance(pm, dict) or not isinstance(pm.get("name"), str) or not pm["name"].strip():
+                return "players_meta[].name fehlt"
+    boss_hp = data.get("boss_hp")
+    if boss_hp is not None:
+        if not isinstance(boss_hp, list):
+            return "boss_hp muss eine Liste sein"
+        for s in boss_hp:
+            if not isinstance(s, dict) or not isinstance(s.get("t_ms"), (int, float)):
+                return "boss_hp[].t_ms fehlt oder ist keine Zahl"
+            if not isinstance(s.get("hp_pct"), (int, float)):
+                return "boss_hp[].hp_pct fehlt oder ist keine Zahl"
+    heals = data.get("heals")
+    if heals is not None:
+        if not isinstance(heals, list):
+            return "heals muss eine Liste sein"
+        for h in heals:
+            if not isinstance(h, dict) or not isinstance(h.get("t_ms"), (int, float)):
+                return "heals[].t_ms fehlt oder ist keine Zahl"
+            if not isinstance(h.get("player"), str) or not h["player"].strip():
+                return "heals[].player fehlt"
+            if not isinstance(h.get("amount"), (int, float)):
+                return "heals[].amount fehlt oder ist keine Zahl"
     return None
 
 
@@ -211,16 +253,21 @@ def merge_bosses(reports: list[dict]) -> list[dict]:
     return [{"name": name, "players": merge_players(per_boss[name])} for name in order]
 
 
-def pick_best_timeline(reports: list[dict]) -> list[dict] | None:
-    """Jede Meldung sieht (je nach deckbar-capture) im Prinzip dieselbe Zeitleiste der ganzen
-    Gruppe — nimmt die mit den meisten Einträgen, statt zu versuchen, mehrere unabhängige
-    Mitschnitte event-genau zusammenzuführen."""
+def pick_best_list(reports: list[dict], key: str) -> list[dict] | None:
+    """Für `timeline`/`players_meta`/`boss_hp`/`heals`: jede Meldung sieht (je nach
+    deckbar-capture) im Prinzip dieselben Rohdaten der ganzen Gruppe — nimmt die Liste mit den
+    meisten Einträgen, statt zu versuchen, mehrere unabhängige Mitschnitte event-genau
+    zusammenzuführen."""
     best: list[dict] | None = None
     for report in reports:
-        tl = report.get("timeline")
-        if isinstance(tl, list) and (best is None or len(tl) > len(best)):
-            best = tl
+        values = report.get(key)
+        if isinstance(values, list) and (best is None or len(values) > len(best)):
+            best = values
     return best
+
+
+def pick_best_timeline(reports: list[dict]) -> list[dict] | None:
+    return pick_best_list(reports, "timeline")
 
 
 def bucket_dps(timeline: list[dict], fight_ms: int, buckets: int = 60) -> dict:
@@ -241,23 +288,72 @@ def bucket_dps(timeline: list[dict], fight_ms: int, buckets: int = 60) -> dict:
     return {"labels_s": labels_s, "series": series}
 
 
+def boss_hp_series(boss_hp: list[dict]) -> dict:
+    """`boss_hp`-Samples fürs HP-über-Zeit-Diagramm (Berserk-/Enrage-Zeitpunkt erkennbar an
+    einem Sprung in der Abnahme-Geschwindigkeit)."""
+    ordered = sorted(boss_hp, key=lambda s: s.get("t_ms", 0))
+    return {
+        "labels_s": [round(s.get("t_ms", 0) / 1000, 1) for s in ordered],
+        "values": [round(float(s.get("hp_pct") or 0), 1) for s in ordered],
+    }
+
+
+def heals_summary(heals: list[dict]) -> list[dict]:
+    """Pro Heiler: Gesamtheilung und Anzahl Heilungen, absteigend — für die Heilungsübersicht."""
+    per_player: dict[str, dict] = {}
+    for h in heals:
+        name = h.get("player")
+        if not name:
+            continue
+        s = per_player.setdefault(name, {"name": name, "heals": 0, "amount": 0.0})
+        s["heals"] += 1
+        s["amount"] += float(h.get("amount") or 0)
+    return sorted(per_player.values(), key=lambda s: -s["amount"])
+
+
 def timeline_stats(timeline: list[dict]) -> dict[str, dict]:
-    """Pro Spieler: Trefferzahl, Crit-/Back-Attack-Rate, Gesamtschaden aus der Zeitleiste —
-    unabhängig von den schon gemeldeten players[]-Summen, direkt aus den Einzelereignissen."""
+    """Pro Spieler: Trefferzahl, Crit-/Back-Attack-/Perfect-/Double-Rate, Gesamtschaden aus der
+    Zeitleiste — unabhängig von den schon gemeldeten players[]-Summen, direkt aus den
+    Einzelereignissen."""
     stats: dict[str, dict] = {}
     for ev in timeline:
         name = ev.get("player")
         if not name:
             continue
-        s = stats.setdefault(name, {"hits": 0, "crits": 0, "backs": 0, "damage": 0.0})
+        s = stats.setdefault(name, {"hits": 0, "crits": 0, "backs": 0, "perfects": 0, "doubles": 0, "damage": 0.0})
         s["hits"] += 1
         s["crits"] += 1 if ev.get("crit") else 0
         s["backs"] += 1 if ev.get("back") else 0
+        s["perfects"] += 1 if ev.get("perfect") else 0
+        s["doubles"] += 1 if ev.get("double") else 0
         s["damage"] += float(ev.get("damage") or 0)
     for s in stats.values():
-        s["crit_pct"] = round(100 * s["crits"] / s["hits"], 1) if s["hits"] else 0.0
-        s["back_pct"] = round(100 * s["backs"] / s["hits"], 1) if s["hits"] else 0.0
+        for flag, key in (("crit", "crits"), ("back", "backs"), ("perfect", "perfects"), ("double", "doubles")):
+            s[f"{flag}_pct"] = round(100 * s[key] / s["hits"], 1) if s["hits"] else 0.0
     return stats
+
+
+def skill_breakdown(timeline: list[dict], top: int = 8) -> dict[str, list[dict]]:
+    """Pro Spieler die Top-`top`-Skills nach Gesamtschaden (Name, Treffer, Schaden, Anteil an
+    dessen Gesamtschaden) — die Skill-Aufschlüsselung, die auf der Analyse-Seite angezeigt wird."""
+    per_player: dict[str, dict[str, dict]] = {}
+    for ev in timeline:
+        name = ev.get("player")
+        if not name:
+            continue
+        skill = str(ev.get("skill") or "–")
+        bucket = per_player.setdefault(name, {})
+        s = bucket.setdefault(skill, {"skill": skill, "hits": 0, "damage": 0.0})
+        s["hits"] += 1
+        s["damage"] += float(ev.get("damage") or 0)
+    result: dict[str, list[dict]] = {}
+    for name, skills in per_player.items():
+        total = sum(s["damage"] for s in skills.values()) or 1.0
+        ordered = sorted(skills.values(), key=lambda s: -s["damage"])[:top]
+        for s in ordered:
+            s["pct"] = round(100 * s["damage"] / total, 1)
+        result[name] = ordered
+    return result
 
 
 def runs_dir(db) -> Path:
@@ -414,6 +510,7 @@ class AionDedup(commands.Cog):
             "bosses_total": int(data["bosses_total"]), "bosses_killed": int(data["bosses_killed"]),
             "start_ms": int(data["start_ms"]), "fight_ms": int(data["fight_ms"]), "players": data["players"],
             "bosses": data.get("bosses") or [], "timeline": data.get("timeline"),
+            "players_meta": data.get("players_meta"), "boss_hp": data.get("boss_hp"), "heals": data.get("heals"),
         }
         clusters = self.api_pending.setdefault(guild_id, [])
         for c in clusters:
@@ -439,8 +536,13 @@ class AionDedup(commands.Cog):
             return
         players = merge_players(cluster.reports)
         bosses = merge_bosses(cluster.reports)
-        timeline = pick_best_timeline(cluster.reports)
-        run_id = await self._store_run(cluster.guild_id, cluster.run, players, bosses, timeline, len(cluster.reports)) \
+        timeline = pick_best_list(cluster.reports, "timeline")
+        extras = {
+            "players_meta": pick_best_list(cluster.reports, "players_meta"),
+            "boss_hp": pick_best_list(cluster.reports, "boss_hp"),
+            "heals": pick_best_list(cluster.reports, "heals"),
+        }
+        run_id = await self._store_run(cluster.guild_id, cluster.run, players, bosses, timeline, extras, len(cluster.reports)) \
             if timeline else None
         embed = build_run_embed(cluster.run, players, len(cluster.reports), bosses, run_id=run_id)
         try:
@@ -450,7 +552,7 @@ class AionDedup(commands.Cog):
 
     async def _store_run(
         self, guild_id: int, run: dict, players: list[dict], bosses: list[dict],
-        timeline: list[dict], reporters: int,
+        timeline: list[dict], extras: dict, reporters: int,
     ) -> str:
         run_id = secrets.token_urlsafe(16)
         created = time.time()
@@ -458,7 +560,7 @@ class AionDedup(commands.Cog):
             "dungeon": run["dungeon"], "difficulty": run.get("difficulty"),
             "bosses_total": run["bosses_total"], "bosses_killed": run["bosses_killed"],
             "fight_ms": run["fight_ms"], "created": created, "reporters": reporters,
-            "players": players, "bosses": bosses, "timeline": timeline,
+            "players": players, "bosses": bosses, "timeline": timeline, **extras,
         }
         path = runs_dir(self.db) / f"{run_id}.json"
         text = json.dumps(data)

@@ -196,7 +196,15 @@ table.matrix form { margin: 0; }
 .bar-track { flex: 1; height: 16px; border-radius: 8px; background: rgba(0, 0, 0, 0.3); overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 8px; background: linear-gradient(90deg, var(--accent), #8f7cff); }
 .bar-value { width: 140px; flex-shrink: 0; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+.bar-meta { font-size: 11px; color: var(--dim); white-space: nowrap; }
 @media (max-width: 600px) { .bar-name { width: 70px; } .bar-value { width: 100px; font-size: 12px; } }
+
+details { margin: 6px 0; border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px; }
+details summary { cursor: pointer; font-weight: 500; color: var(--text); list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: "▸ "; color: var(--dim); }
+details[open] summary::before { content: "▾ "; }
+details .bar-row { padding: 4px 0; }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
@@ -1366,7 +1374,7 @@ class Dashboard(commands.Cog):
         run_id = request.match_info["id"]
         if not re.match(r"^[A-Za-z0-9_-]{10,40}$", run_id):
             return web.Response(text="Ungültiger Link.", status=400)
-        from .aion_dedup import bucket_dps, runs_dir, timeline_stats
+        from .aion_dedup import boss_hp_series, bucket_dps, heals_summary, runs_dir, skill_breakdown, timeline_stats
 
         path = runs_dir(self.db) / f"{run_id}.json"
         try:
@@ -1377,16 +1385,25 @@ class Dashboard(commands.Cog):
         players = data.get("players") or []
         bosses = data.get("bosses") or []
         timeline = data.get("timeline") or []
+        players_meta = {m["name"]: m for m in (data.get("players_meta") or [])}
         fight_ms = data.get("fight_ms") or 0
         minutes, seconds = divmod(round(fight_ms / 1000), 60)
         title = data["dungeon"] + (f" ({data['difficulty']})" if data.get("difficulty") else "")
+
+        def meta_line(name: str) -> str:
+            m = players_meta.get(name)
+            if not m:
+                return ""
+            bits = [b for b in [m.get("class"), f"GS {m['gear_score']}" if m.get("gear_score") else None,
+                                f"CP {m['combat_power']}" if m.get("combat_power") else None] if b]
+            return f'<div class="bar-meta">{esc(" · ".join(bits))}</div>' if bits else ""
 
         max_damage = players[0]["damage"] if players else 0
         player_rows = []
         for p in players:
             pct = (100 * p["damage"] / max_damage) if max_damage else 0
             player_rows.append(
-                f'<div class="bar-row"><span class="bar-name">{esc(p["name"])}</span>'
+                f'<div class="bar-row"><span class="bar-name">{esc(p["name"])}{meta_line(p["name"])}</span>'
                 f'<div class="bar-track"><div class="bar-fill" style="width:{pct:.1f}%"></div></div>'
                 f'<span class="bar-value">{p["damage"]:,} ({p["dps"]:.0f}/s)</span></div>'
             )
@@ -1406,14 +1423,32 @@ class Dashboard(commands.Cog):
             boss_cards.append(f'<div class="card"><h2>🗡️ {esc(b["name"])}</h2>{"".join(rows)}</div>')
 
         timeline_html = ""
+        scripts = []
         if timeline:
             stats = timeline_stats(timeline)
-            chart = bucket_dps(timeline, fight_ms or 1)
+            dps_chart = bucket_dps(timeline, fight_ms or 1)
             stat_rows = "".join(
-                f"<tr><td>{esc(name)}</td><td>{s['hits']}</td><td>{s['crit_pct']}%</td><td>{s['back_pct']}%</td></tr>"
-                for name, s in sorted(stats.items(), key=lambda kv: -kv[1]['damage'])
+                f"<tr><td>{esc(name)}</td><td>{s['hits']}</td><td>{s['crit_pct']}%</td>"
+                f"<td>{s['back_pct']}%</td><td>{s['perfect_pct']}%</td><td>{s['double_pct']}%</td></tr>"
+                for name, s in sorted(stats.items(), key=lambda kv: -kv[1]["damage"])
             )
-            chart_json = esc_js(json.dumps(chart))
+
+            skills = skill_breakdown(timeline)
+            skill_blocks = []
+            for name, skill_list in sorted(skills.items(), key=lambda kv: -sum(s["damage"] for s in kv[1])):
+                if not skill_list:
+                    continue
+                max_skill_dmg = skill_list[0]["damage"]
+                skill_rows = "".join(
+                    f'<div class="bar-row"><span class="bar-name">{esc(s["skill"])}</span>'
+                    f'<div class="bar-track"><div class="bar-fill" style="width:{100 * s["damage"] / max_skill_dmg:.1f}%"></div></div>'
+                    f'<span class="bar-value">{s["pct"]}% ({s["hits"]}×)</span></div>'
+                    for s in skill_list
+                )
+                skill_blocks.append(
+                    f"<details><summary>{esc(name)}</summary>{skill_rows}</details>"
+                )
+
             timeline_html = f"""
 <div class="card">
   <h2>DPS über Zeit</h2>
@@ -1421,30 +1456,67 @@ class Dashboard(commands.Cog):
 </div>
 <div class="card">
   <h2>Trefferstatistik</h2>
-  <table><tr><th>Spieler</th><th>Treffer</th><th>Crit-Rate</th><th>Back-Attack-Rate</th></tr>{stat_rows}</table>
+  <table><tr><th>Spieler</th><th>Treffer</th><th>Crit</th><th>Back-Attack</th><th>Perfect</th><th>Double</th></tr>{stat_rows}</table>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
-<script>
-(function() {{
-  const data = {chart_json};
-  const colours = ["#5ac8fa","#8f7cff","#ff9f0a","#30d158","#ff453a","#f2f3f7","#64d2ff","#bf5af2"];
-  const datasets = Object.keys(data.series).map((name, i) => ({{
-    label: name, data: data.series[name], borderColor: colours[i % colours.length],
-    backgroundColor: "transparent", tension: 0.25, pointRadius: 0, borderWidth: 2,
-  }}));
-  new Chart(document.getElementById("dpsChart"), {{
-    type: "line",
-    data: {{ labels: data.labels_s, datasets }},
-    options: {{
-      scales: {{
-        x: {{ title: {{ display: true, text: "Sekunden", color: "#aaa" }}, ticks: {{ color: "#aaa" }}, grid: {{ color: "rgba(255,255,255,0.08)" }} }},
+<div class="card"><h2>Skill-Aufschlüsselung</h2>{"".join(skill_blocks)}</div>"""
+            scripts.append(("dpsChart", "line", dps_chart, "Sekunden"))
+
+        hp_html = ""
+        boss_hp = data.get("boss_hp") or []
+        if boss_hp:
+            hp_chart = boss_hp_series(boss_hp)
+            hp_html = '<div class="card"><h2>Boss-HP über Zeit</h2><canvas id="hpChart" height="180"></canvas></div>'
+            scripts.append(("hpChart", "hp", hp_chart, "Sekunden"))
+
+        heal_html = ""
+        heals = data.get("heals") or []
+        if heals:
+            heal_rows = "".join(
+                f"<tr><td>{esc(h['name'])}</td><td>{h['heals']}</td><td>{h['amount']:,.0f}</td></tr>"
+                for h in heals_summary(heals)
+            )
+            heal_html = f'<div class="card"><h2>Heilung</h2><table><tr><th>Spieler</th><th>Heilungen</th><th>Gesamt</th></tr>{heal_rows}</table></div>'
+
+        script_html = ""
+        if scripts:
+            chunks = []
+            for canvas_id, kind, chart, x_label in scripts:
+                chart_json = esc_js(json.dumps(chart))
+                if kind == "line":
+                    chunks.append(f"""
+  {{
+    const data = {chart_json};
+    const colours = ["#5ac8fa","#8f7cff","#ff9f0a","#30d158","#ff453a","#f2f3f7","#64d2ff","#bf5af2"];
+    const datasets = Object.keys(data.series).map((name, i) => ({{
+      label: name, data: data.series[name], borderColor: colours[i % colours.length],
+      backgroundColor: "transparent", tension: 0.25, pointRadius: 0, borderWidth: 2,
+    }}));
+    new Chart(document.getElementById("{canvas_id}"), {{
+      type: "line", data: {{ labels: data.labels_s, datasets }},
+      options: {{ scales: {{
+        x: {{ title: {{ display: true, text: "{x_label}", color: "#aaa" }}, ticks: {{ color: "#aaa" }}, grid: {{ color: "rgba(255,255,255,0.08)" }} }},
         y: {{ ticks: {{ color: "#aaa" }}, grid: {{ color: "rgba(255,255,255,0.08)" }} }},
-      }},
-      plugins: {{ legend: {{ labels: {{ color: "#f2f3f7" }} }} }},
-    }},
-  }});
-}})();
-</script>"""
+      }}, plugins: {{ legend: {{ labels: {{ color: "#f2f3f7" }} }} }} }},
+    }});
+  }}""")
+                else:
+                    chunks.append(f"""
+  {{
+    const data = {chart_json};
+    new Chart(document.getElementById("{canvas_id}"), {{
+      type: "line",
+      data: {{ labels: data.labels_s, datasets: [{{ label: "HP %", data: data.values, borderColor: "#ff453a",
+        backgroundColor: "rgba(255,69,58,0.12)", fill: true, tension: 0.15, pointRadius: 0, borderWidth: 2 }}] }},
+      options: {{ scales: {{
+        x: {{ title: {{ display: true, text: "{x_label}", color: "#aaa" }}, ticks: {{ color: "#aaa" }}, grid: {{ color: "rgba(255,255,255,0.08)" }} }},
+        y: {{ min: 0, max: 100, ticks: {{ color: "#aaa" }}, grid: {{ color: "rgba(255,255,255,0.08)" }} }},
+      }}, plugins: {{ legend: {{ display: false }} }} }},
+    }});
+  }}""")
+            script_html = (
+                '<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>'
+                f"<script>(function() {{{''.join(chunks)}}})();</script>"
+            )
 
         reported = datetime_fromtimestamp_de(data.get("created"))
         body = f"""
@@ -1456,7 +1528,10 @@ class Dashboard(commands.Cog):
 </div>
 <div class="card"><h2>Schaden gesamt</h2>{"".join(player_rows)}</div>
 {"".join(boss_cards)}
-{timeline_html}"""
+{hp_html}
+{heal_html}
+{timeline_html}
+{script_html}"""
         return web.Response(text=public_layout(title, body), content_type="text/html")
 
     async def api_aion_fight(self, request: web.Request) -> web.Response:

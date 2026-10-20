@@ -413,6 +413,74 @@ def test_aion_bucket_dps_and_timeline_stats():
     assert stats["B"]["hits"] == 1 and stats["B"]["crit_pct"] == 0.0
 
 
+def test_aion_timeline_stats_perfect_and_double():
+    from bot.cogs.aion_dedup import timeline_stats
+
+    timeline = [
+        {"t_ms": 0, "player": "A", "damage": 100, "perfect": True, "double": False},
+        {"t_ms": 10, "player": "A", "damage": 100, "perfect": False, "double": True},
+        {"t_ms": 20, "player": "A", "damage": 100, "perfect": False, "double": False},
+    ]
+    stats = timeline_stats(timeline)
+    assert stats["A"]["perfects"] == 1 and stats["A"]["doubles"] == 1
+    assert stats["A"]["perfect_pct"] == round(100 / 3, 1)
+    assert stats["A"]["double_pct"] == round(100 / 3, 1)
+
+
+def test_aion_skill_breakdown():
+    from bot.cogs.aion_dedup import skill_breakdown
+
+    timeline = [
+        {"t_ms": 0, "player": "A", "skill": "Fireball", "damage": 300},
+        {"t_ms": 10, "player": "A", "skill": "Fireball", "damage": 300},
+        {"t_ms": 20, "player": "A", "skill": "Ice Shard", "damage": 400},
+        {"t_ms": 30, "player": "B", "skill": "Heal", "damage": 50},
+    ]
+    result = skill_breakdown(timeline)
+    a_skills = {s["skill"]: s for s in result["A"]}
+    assert a_skills["Fireball"]["hits"] == 2 and a_skills["Fireball"]["damage"] == 600
+    assert a_skills["Fireball"]["pct"] == 60.0  # 600 von 1000 Gesamtschaden A
+    assert a_skills["Ice Shard"]["pct"] == 40.0
+    # sortiert absteigend nach Schaden
+    assert [s["skill"] for s in result["A"]] == ["Fireball", "Ice Shard"]
+    assert result["B"][0]["skill"] == "Heal"
+
+    # top-Begrenzung
+    many = [{"t_ms": i, "player": "C", "skill": f"S{i}", "damage": 1} for i in range(20)]
+    assert len(skill_breakdown(many, top=5)["C"]) == 5
+
+
+def test_aion_boss_hp_series_and_heals_summary():
+    from bot.cogs.aion_dedup import boss_hp_series, heals_summary
+
+    boss_hp = [{"t_ms": 5000, "hp_pct": 80.0}, {"t_ms": 0, "hp_pct": 100.0}]  # unsortiert
+    series = boss_hp_series(boss_hp)
+    assert series["labels_s"] == [0.0, 5.0]  # nach t_ms sortiert
+    assert series["values"] == [100.0, 80.0]
+
+    heals = [
+        {"t_ms": 0, "player": "Priest", "target": "A", "amount": 1000},
+        {"t_ms": 10, "player": "Priest", "target": "B", "amount": 2000},
+        {"t_ms": 20, "player": "Chanter", "target": "A", "amount": 500},
+    ]
+    summary = heals_summary(heals)
+    assert summary[0] == {"name": "Priest", "heals": 2, "amount": 3000.0}
+    assert summary[1]["name"] == "Chanter"  # absteigend nach Gesamtheilung
+
+
+def test_aion_pick_best_list_generic():
+    from bot.cogs.aion_dedup import pick_best_list
+
+    reports = [
+        {"timeline": [1, 2], "boss_hp": [1, 2, 3]},
+        {"timeline": [1, 2, 3, 4]},
+        {},
+    ]
+    assert pick_best_list(reports, "timeline") == [1, 2, 3, 4]
+    assert pick_best_list(reports, "boss_hp") == [1, 2, 3]
+    assert pick_best_list(reports, "heals") is None
+
+
 def test_dashboard_esc_js_and_date_formatting():
     from bot.cogs.dashboard import datetime_fromtimestamp_de, esc_js
 
@@ -469,11 +537,18 @@ def test_aion_store_run_and_serve_analysis_page():
                    "bosses_killed": 1, "fight_ms": 96_000}
             players = [{"name": "Xqzmepls", "damage": 5_103_784, "dps": 53_107.4}]
             timeline = [
-                {"t_ms": 0, "player": "Xqzmepls", "damage": 5648, "crit": False, "back": True},
-                {"t_ms": 500, "player": "Xqzmepls", "damage": 14_104, "crit": True, "back": True},
+                {"t_ms": 0, "player": "Xqzmepls", "skill": "Arrow of Reckoning", "damage": 5648,
+                 "crit": False, "back": True, "perfect": True, "double": False},
+                {"t_ms": 500, "player": "Xqzmepls", "skill": "Arrow of Reckoning", "damage": 14_104,
+                 "crit": True, "back": True, "perfect": False, "double": True},
             ]
+            extras = {
+                "players_meta": [{"name": "Xqzmepls", "class": "Ranger", "gear_score": 2850, "combat_power": 12500}],
+                "boss_hp": [{"t_ms": 0, "hp_pct": 100.0}, {"t_ms": 96_000, "hp_pct": 0.0}],
+                "heals": [{"t_ms": 100, "player": "Khai", "target": "Xqzmepls", "amount": 2000}],
+            }
 
-            run_id = await aion_cog._store_run(1, run, players, [], timeline, reporters=1)
+            run_id = await aion_cog._store_run(1, run, players, [], timeline, extras, reporters=1)
 
             row = await db.fetchone("SELECT * FROM aion_runs WHERE id=?", (run_id,))
             assert row["dungeon"] == "Fire Temple" and row["guild_id"] == 1
@@ -489,6 +564,10 @@ def test_aion_store_run_and_serve_analysis_page():
             assert "Fire Temple" in resp.text
             assert "Xqzmepls" in resp.text
             assert "dpsChart" in resp.text  # Diagramm nur, wenn eine Zeitleiste vorliegt
+            assert "Ranger" in resp.text and "GS 2850" in resp.text  # players_meta
+            assert "hpChart" in resp.text  # Boss-HP-Diagramm nur, wenn boss_hp vorliegt
+            assert "Khai" in resp.text  # Heilungsübersicht
+            assert "Arrow of Reckoning" in resp.text  # Skill-Aufschlüsselung
 
             await db.close()
 
