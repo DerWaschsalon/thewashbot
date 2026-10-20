@@ -209,15 +209,25 @@ Discord-Bot-Modul (`daemon/deckbar_daemon/bot.py`) umgesetzt, Einrichtung dort �
      ],
      "timeline": [                                        // optional, für die Analyse-Seite
        {"t_ms": 1234, "player": "ReZero", "skill": "18090340",
-        "damage": 41200, "crit": true, "back": false, "perfect": false, "double": false},
+        "damage": 41200, "crit": true, "back": false, "perfect": false, "double": false,
+        "buffs": ["18090999"]},                            // optional, aktive Buff/Debuff-Codes bei diesem Treffer
        …
      ],
-     "skills": {                                           // optional, löst "skill" oben auf
-       "18090340": {"name": "Arrow of Reckoning", "icon": "https://assets.playnccdn.com/…/ICON_RA_SKILL_031.png"}
+     "skills": {                                           // optional, löst "skill" UND "buffs" oben auf
+       "18090340": {"name": "Arrow of Reckoning", "icon": "https://assets.playnccdn.com/…/ICON_RA_SKILL_031.png"},
+       "18090999": {"name": "Bloodlust", "icon": "https://assets.playnccdn.com/…/ICON_RA_BUFF_004.png"}
      },
      "players_meta": [{"name": "ReZero", "class": "Ranger", "gear_score": 2850, "combat_power": 12500}],  // optional
      "boss_hp": [{"t_ms": 0, "hp_pct": 100.0}, {"t_ms": 5000, "hp_pct": 92.3}, …],  // optional
-     "heals": [{"t_ms": 1234, "player": "Priest1", "target": "ReZero", "amount": 8200}, …]  // optional
+     "heals": [{"t_ms": 1234, "player": "Priest1", "target": "ReZero", "amount": 8200}, …],  // optional
+     "attempts": [                                         // optional, einzelne Versuche/Trash-Phasen
+       {"label": "Versuch 1", "killed": false, "duration_ms": 92000,
+        "players": [{"name": "ReZero", "damage": 3100000, "dps": 33700}, …],
+        "timeline": [/* wie oben, nur für diesen Versuch */]},
+       {"label": "Versuch 2 (Kill)", "killed": true, "duration_ms": 350000,
+        "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}, …],
+        "timeline": [/* … */]}
+     ]
    }
    ```
 
@@ -243,6 +253,18 @@ Discord-Bot-Modul (`daemon/deckbar_daemon/bot.py`) umgesetzt, Einrichtung dort �
    Einträgen (bei `skills`: alle Mitschnitte vereint statt nur den größten genommen — andere
    Mitschnitte könnten andere Skills aufgelöst haben), statt mehrere unabhängige Mitschnitte
    event-genau zusammenzuführen.
+
+   `buffs` in einem Timeline-Eintrag ist optional und listet die Codes der beim jeweiligen Treffer
+   aktiven Buffs/Debuffs (z. B. eigene oder gruppeneigene Verstärkungen) — aufgelöst über dieselbe
+   `skills`-Tabelle wie oben. Die Analyse-Seite zeigt daraus pro Spieler eine aufklappbare
+   Buff/Debuff-Übersicht mit Anwesenheitsrate (Anteil der eigenen Treffer, bei denen der jeweilige
+   Buff aktiv war — keine echte Zeit-Uptime, da nur bei Treffern gemessen, nicht kontinuierlich).
+
+   `attempts` ist ebenfalls optional und bildet einzelne Versuche/Trash-Phasen innerhalb eines
+   Laufs ab (z. B. mehrere Wipes vor dem Kill) — jeder Eintrag hat ein `label`, optional `killed`
+   und `duration_ms`, eine eigene `players`-Liste und optional eine eigene `timeline`. Die
+   Analyse-Seite zeigt dafür einen aufklappbaren „Versuche"-Abschnitt mit je einem eigenen
+   Schadens-/DPS-/Trefferstatistik-Block pro Versuch (letzter Versuch standardmäßig aufgeklappt).
 
 Beide Varianten laufen unabhängig nebeneinander — schadet nichts, beide gleichzeitig eingerichtet
 zu haben.

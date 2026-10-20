@@ -218,3 +218,30 @@ für unsere eigene, einfachere Version genommen.
 - Getestet (2026-10-20) mit echten Kampfdaten von AbyssLogs (ein öffentliches Beispiel, keine
   eigenen Spielerdaten) als Test-Payload gegen den echten `/api/aion/fight`-Endpunkt auf
   unraid-server — Discord-Post inkl. Analyse-Link und die Seite selbst funktionieren.
+
+## Erweiterung der Analyse-Seite: Bestenliste, Buffs/Debuffs, Versuche (2026-10-20)
+
+Weiter Richtung AbyssLogs-Parität ausgebaut (auf Wunsch: „alles so aufbauen wie in AbyssLogs").
+
+- **Bestenliste** (`/leaderboard/{guild_id}`, ebenfalls öffentlich ohne Login — `guild_id` ist
+  keine geheime Information): neue Tabelle `aion_leaderboard` (`guild_id, boss, player` als
+  Primärschlüssel) hält pro Spieler/Boss den besten je gemeldeten DPS-Wert über alle Läufe hinweg
+  fest (`INSERT … ON CONFLICT … DO UPDATE … WHERE excluded.dps > aion_leaderboard.dps`, reines
+  Upsert-wenn-besser). `leaderboard_rows(bosses, players_meta)` baut die Zeilen aus denselben
+  Feldern, die auch die Analyse-Seite nutzt. `build_run_embed()` verlinkt bei vorhandenen `bosses`
+  zusätzlich zur Analyse-Seite die Bestenliste des Servers im selben „📊 Analyse"-Feld.
+- **Buffs/Debuffs pro Treffer**: `timeline[].buffs` (optional, Liste aktiver Buff-/Debuff-Codes
+  beim jeweiligen Treffer) wird über dieselbe `skills`-Tabelle aufgelöst wie `timeline[].skill`.
+  `buff_uptime(timeline, skills)` baut daraus pro Spieler eine Top-10-Liste mit
+  Anwesenheitsrate (Anteil eigener Treffer mit aktivem Buff — keine echte Zeit-Uptime, da nur
+  treffergenau gemessen, nicht kontinuierlich). Auf der Analyse-Seite als aufklappbarer
+  „Buffs/Debuffs"-Abschnitt pro Spieler, mit Icon wie bei der Skill-Aufschlüsselung.
+- **Mehrere Versuche/Trash-Phasen** (`attempts[]`, optional, Top-Level): jeder Eintrag hat
+  `label`, optional `killed`/`duration_ms`, eine eigene `players`-Liste und optional eine eigene
+  `timeline`. `render_fight_section()` (neuer, wiederverwendbarer Renderer in
+  `bot/cogs/dashboard.py`) baut daraus pro Versuch denselben Block wie für den Hauptkampf
+  (Schadensbalken + bei vorhandener Zeitleiste DPS-Diagramm/Trefferstatistik/Skill-/Buff-
+  Aufschlüsselung) — auf der Analyse-Seite als aufklappbarer „Versuche (n)"-Abschnitt, letzter
+  Versuch standardmäßig aufgeklappt.
+- Alle drei Felder sind wie gewohnt optional und unabhängig voneinander nutzbar, keines ist
+  Voraussetzung für die anderen. 64 Tests grün (`python3 -m pytest -q tests`), kein Regressionen.

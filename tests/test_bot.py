@@ -393,6 +393,16 @@ def test_aion_timeline_validation_and_best_pick():
     assert validate_fight_payload({**base, "skills": "nope"}) is not None  # kein Objekt
     assert validate_fight_payload({**base, "skills": {"123": "nope"}}) is not None  # Wert kein Objekt
 
+    assert validate_fight_payload({**base, "timeline": [{"t_ms": 0, "player": "x", "damage": 1, "buffs": ["a"]}]}) is None
+    assert validate_fight_payload({**base, "timeline": [{"t_ms": 0, "player": "x", "damage": 1, "buffs": "a"}]}) is not None
+
+    valid_attempt = {"label": "Versuch 1", "killed": False, "players": [{"name": "x", "damage": 1}]}
+    assert validate_fight_payload({**base, "attempts": [valid_attempt]}) is None
+    assert validate_fight_payload({**base, "attempts": "nope"}) is not None
+    assert validate_fight_payload({**base, "attempts": [{"players": []}]}) is not None  # label fehlt
+    assert validate_fight_payload({**base, "attempts": [{"label": "x", "players": []}]}) is not None  # players leer
+    assert validate_fight_payload({**base, "attempts": [{"label": "x", "players": [{"name": "y"}]}]}) is not None  # damage fehlt
+
 
 def test_aion_bucket_dps_and_timeline_stats():
     from bot.cogs.aion_dedup import bucket_dps, timeline_stats
@@ -469,6 +479,36 @@ def test_aion_skill_breakdown_resolves_name_and_icon():
     # kein Eintrag in der Lookup-Tabelle -> der rohe Wert wird als Name angezeigt, kein Icon
     assert by_key["unknown-code"]["skill"] == "unknown-code"
     assert by_key["unknown-code"]["icon"] is None
+
+
+def test_aion_buff_uptime():
+    from bot.cogs.aion_dedup import buff_uptime
+
+    timeline = [
+        {"t_ms": 0, "player": "A", "damage": 1, "buffs": ["buff1", "buff2"]},
+        {"t_ms": 10, "player": "A", "damage": 1, "buffs": ["buff1"]},
+        {"t_ms": 20, "player": "A", "damage": 1},  # kein buffs-Feld -> zählt trotzdem als Treffer
+        {"t_ms": 30, "player": "A", "damage": 1},
+        {"t_ms": 0, "player": "B", "damage": 1, "buffs": ["buff1"]},
+    ]
+    result = buff_uptime(timeline)
+    a_by_key = {b["key"]: b for b in result["A"]}
+    assert a_by_key["buff1"]["pct"] == 50.0  # 2 von 4 Treffern
+    assert a_by_key["buff2"]["pct"] == 25.0  # 1 von 4 Treffern
+    assert result["B"][0]["pct"] == 100.0  # Bs einziger Treffer hatte buff1
+
+    skills = {"buff1": {"name": "Haste", "icon": "https://example.com/haste.png"}}
+    with_names = buff_uptime(timeline, skills)
+    a_named = {b["key"]: b for b in with_names["A"]}
+    assert a_named["buff1"]["buff"] == "Haste" and a_named["buff1"]["icon"] == "https://example.com/haste.png"
+    assert a_named["buff2"]["buff"] == "buff2" and a_named["buff2"]["icon"] is None  # nicht aufgelöst
+
+    # top-Begrenzung
+    many_buffs = [{"t_ms": 0, "player": "C", "damage": 1, "buffs": [f"b{i}" for i in range(15)]}]
+    assert len(buff_uptime(many_buffs, top=5)["C"]) == 5
+
+    # niemand hat buffs gemeldet -> leeres Ergebnis, kein Absturz
+    assert buff_uptime([{"t_ms": 0, "player": "D", "damage": 1}]) == {}
 
 
 def test_aion_merge_skill_maps():
@@ -633,6 +673,23 @@ def test_dashboard_esc_js_and_date_formatting():
     assert len(datetime_fromtimestamp_de(1_760_000_000)) > 0
 
 
+def test_dashboard_render_fight_section():
+    from bot.cogs.dashboard import render_fight_section
+
+    players = [{"name": "A", "damage": 100, "dps": 10}]
+    # ohne Zeitleiste: nur Schaden-Balken, kein Diagramm
+    html, spec = render_fight_section(players, [], {}, "chart0")
+    assert "A" in html and "100" in html and spec is None
+    assert "<canvas" not in html
+
+    timeline = [{"t_ms": 0, "player": "A", "skill": "s1", "damage": 100, "crit": True, "buffs": ["b1"]}]
+    html2, spec2 = render_fight_section(players, timeline, {"s1": {"name": "Fireball"}}, "chart1")
+    assert '<canvas id="chart1"' in html2
+    assert "Fireball" in html2  # Skill-Aufschlüsselung mit aufgelöstem Namen
+    assert "b1" in html2  # Buff ohne Lookup-Eintrag -> roher Wert
+    assert spec2 is not None and spec2[0] == "chart1"
+
+
 def test_dashboard_run_page_validates_id_and_404():
     import tempfile
     from pathlib import Path
@@ -679,15 +736,23 @@ def test_aion_store_run_and_serve_analysis_page():
             players = [{"name": "Xqzmepls", "damage": 5_103_784, "dps": 53_107.4}]
             timeline = [
                 {"t_ms": 0, "player": "Xqzmepls", "skill": "18090340", "damage": 5648,
-                 "crit": False, "back": True, "perfect": True, "double": False},
+                 "crit": False, "back": True, "perfect": True, "double": False, "buffs": ["buff_haste"]},
                 {"t_ms": 500, "player": "Xqzmepls", "skill": "18090340", "damage": 14_104,
-                 "crit": True, "back": True, "perfect": False, "double": True},
+                 "crit": True, "back": True, "perfect": False, "double": True, "buffs": ["buff_haste"]},
             ]
             extras = {
                 "players_meta": [{"name": "Xqzmepls", "class": "Ranger", "gear_score": 2850, "combat_power": 12500}],
                 "boss_hp": [{"t_ms": 0, "hp_pct": 100.0}, {"t_ms": 96_000, "hp_pct": 0.0}],
                 "heals": [{"t_ms": 100, "player": "Khai", "target": "Xqzmepls", "amount": 2000}],
-                "skills": {"18090340": {"name": "Arrow of Reckoning", "icon": "https://example.com/icon.png"}},
+                "skills": {"18090340": {"name": "Arrow of Reckoning", "icon": "https://example.com/icon.png"},
+                           "buff_haste": {"name": "Haste", "icon": "https://example.com/haste.png"}},
+                "attempts": [
+                    {"label": "Versuch 1", "killed": False, "duration_ms": 45_000,
+                     "players": [{"name": "Xqzmepls", "damage": 1_000_000, "dps": 22_000}]},
+                    {"label": "Versuch 2", "killed": True, "duration_ms": 96_000,
+                     "players": [{"name": "Xqzmepls", "damage": 5_103_784, "dps": 53_107.4}],
+                     "timeline": [{"t_ms": 0, "player": "Xqzmepls", "skill": "18090340", "damage": 5648}]},
+                ],
             }
 
             run_id = await aion_cog._store_run(1, run, players, [], timeline, extras, reporters=1)
@@ -712,6 +777,12 @@ def test_aion_store_run_and_serve_analysis_page():
             assert "Arrow of Reckoning" in resp.text  # Skill-Aufschlüsselung, Name aus skills aufgelöst
             assert "18090340" not in resp.text  # roher Code wird nicht mehr angezeigt
             assert '<img src="https://example.com/icon.png"' in resp.text  # Skill-Icon
+            assert "Haste" in resp.text and "100.0%" in resp.text  # Buff-Anwesenheit (beide Treffer hatten buff_haste)
+            assert '<img src="https://example.com/haste.png"' in resp.text  # Buff-Icon
+            assert "Versuch 1" in resp.text and "💀 Wipe" in resp.text
+            assert "Versuch 2" in resp.text and "✅ Kill" in resp.text
+            assert 'id="attemptChart1"' in resp.text  # Diagramm nur für den Versuch mit Zeitleiste
+            assert 'id="attemptChart0"' not in resp.text
 
             await db.close()
 

@@ -216,6 +216,11 @@ details summary::before { content: "▸ "; color: var(--dim); }
 details[open] summary::before { content: "▾ "; }
 details .bar-row { padding: 4px 0; }
 
+.bar-group { margin-bottom: 10px; }
+.section { margin-top: 14px; }
+.section h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase;
+             letter-spacing: 0.6px; }
+
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
 
@@ -338,6 +343,63 @@ def role_can_view(channel, role: discord.Role, everyone: discord.Role) -> bool:
         elif ow.view_channel is True:
             base |= VIEW
     return bool(base & VIEW)
+
+
+def render_fight_section(
+    players: list[dict], timeline: list[dict], skills_map: dict, canvas_id: str,
+) -> tuple[str, dict | None]:
+    """Schaden-Balken + (bei vorhandener Zeitleiste) DPS-Diagramm, Trefferstatistik,
+    Skill-Aufschlüsselung und Buffs/Debuffs für EINEN Kampf — genutzt für die Haupt-Rangliste UND
+    für jeden einzelnen Versuch unter „Versuche" (mehrere Boss-Pulls/Wipes in einem Lauf).
+    Gibt (HTML, Chart.js-Datensatz-Angabe-oder-None) zurück."""
+    from .aion_dedup import bucket_dps, buff_uptime, skill_breakdown, timeline_stats
+
+    max_damage = players[0]["damage"] if players else 0
+    player_rows = []
+    for p in players:
+        pct = (100 * p["damage"] / max_damage) if max_damage else 0
+        player_rows.append(
+            f'<div class="bar-row"><span class="bar-name">{esc(p["name"])}</span>'
+            f'<div class="bar-track"><div class="bar-fill" style="width:{pct:.1f}%"></div></div>'
+            f'<span class="bar-value">{p["damage"]:,} ({p["dps"]:.0f}/s)</span></div>'
+        )
+    html = f'<div class="bar-group">{"".join(player_rows)}</div>'
+    chart_spec = None
+    if timeline:
+        fight_ms = max((ev.get("t_ms", 0) for ev in timeline), default=1) or 1
+        stats = timeline_stats(timeline)
+        stat_rows = "".join(
+            f"<tr><td>{esc(name)}</td><td>{s['hits']}</td><td>{s['crit_pct']}%</td>"
+            f"<td>{s['back_pct']}%</td><td>{s['perfect_pct']}%</td><td>{s['double_pct']}%</td></tr>"
+            for name, s in sorted(stats.items(), key=lambda kv: -kv[1]["damage"])
+        )
+        skills = skill_breakdown(timeline, skills_map)
+        skill_blocks = "".join(
+            f"<details><summary>{esc(name)}</summary>" + "".join(
+                f'<div class="bar-row"><span class="bar-name">{skill_icon_html(s.get("icon"))}{esc(s["skill"])}</span>'
+                f'<div class="bar-track"><div class="bar-fill" style="width:{100 * s["damage"] / skill_list[0]["damage"]:.1f}%"></div></div>'
+                f'<span class="bar-value">{s["pct"]}% ({s["hits"]}×)</span></div>'
+                for s in skill_list
+            ) + "</details>"
+            for name, skill_list in sorted(skills.items(), key=lambda kv: -sum(s["damage"] for s in kv[1])) if skill_list
+        )
+        buffs = buff_uptime(timeline, skills_map)
+        buff_blocks = "".join(
+            f"<details><summary>{esc(name)}</summary>" + "".join(
+                f'<div class="bar-row"><span class="bar-name">{skill_icon_html(b.get("icon"))}{esc(b["buff"])}</span>'
+                f'<div class="bar-track"><div class="bar-fill" style="width:{b["pct"]:.1f}%"></div></div>'
+                f'<span class="bar-value">{b["pct"]}%</span></div>'
+                for b in buff_list
+            ) + "</details>"
+            for name, buff_list in sorted(buffs.items()) if buff_list
+        )
+        html += f"""
+<canvas id="{canvas_id}" height="220"></canvas>
+<table><tr><th>Spieler</th><th>Treffer</th><th>Crit</th><th>Back-Attack</th><th>Perfect</th><th>Double</th></tr>{stat_rows}</table>
+{f'<div class="section"><h3>Skills</h3>{skill_blocks}</div>' if skill_blocks else ''}
+{f'<div class="section"><h3>Buffs/Debuffs</h3>{buff_blocks}</div>' if buff_blocks else ''}"""
+        chart_spec = (canvas_id, "line", bucket_dps(timeline, fight_ms), "Sekunden")
+    return html, chart_spec
 
 
 class Dashboard(commands.Cog):
@@ -1385,7 +1447,7 @@ class Dashboard(commands.Cog):
         run_id = request.match_info["id"]
         if not re.match(r"^[A-Za-z0-9_-]{10,40}$", run_id):
             return web.Response(text="Ungültiger Link.", status=400)
-        from .aion_dedup import boss_hp_series, bucket_dps, heals_summary, runs_dir, skill_breakdown, timeline_stats
+        from .aion_dedup import boss_hp_series, bucket_dps, buff_uptime, heals_summary, runs_dir, skill_breakdown, timeline_stats
 
         path = runs_dir(self.db) / f"{run_id}.json"
         try:
@@ -1462,6 +1524,25 @@ class Dashboard(commands.Cog):
                     f"<details><summary>{esc(name)}</summary>{skill_rows}</details>"
                 )
 
+            buffs_by_player = buff_uptime(timeline, skills_map)
+            buff_blocks = []
+            for name, buff_list in sorted(buffs_by_player.items(), key=lambda kv: kv[0]):
+                if not buff_list:
+                    continue
+                buff_rows = "".join(
+                    f'<div class="bar-row">'
+                    f'<span class="bar-name">{skill_icon_html(b.get("icon"))}{esc(b["buff"])}</span>'
+                    f'<div class="bar-track"><div class="bar-fill" style="width:{b["pct"]:.1f}%"></div></div>'
+                    f'<span class="bar-value">{b["pct"]}%</span></div>'
+                    for b in buff_list
+                )
+                buff_blocks.append(f"<details><summary>{esc(name)}</summary>{buff_rows}</details>")
+            buffs_html = (
+                f'<div class="card"><h2>Buffs/Debuffs <span class="hint">(Anwesenheit bei eigenen Treffern)</span></h2>'
+                f'{"".join(buff_blocks)}</div>'
+                if buff_blocks else ""
+            )
+
             timeline_html = f"""
 <div class="card">
   <h2>DPS über Zeit</h2>
@@ -1471,7 +1552,8 @@ class Dashboard(commands.Cog):
   <h2>Trefferstatistik</h2>
   <table><tr><th>Spieler</th><th>Treffer</th><th>Crit</th><th>Back-Attack</th><th>Perfect</th><th>Double</th></tr>{stat_rows}</table>
 </div>
-<div class="card"><h2>Skill-Aufschlüsselung</h2>{"".join(skill_blocks)}</div>"""
+<div class="card"><h2>Skill-Aufschlüsselung</h2>{"".join(skill_blocks)}</div>
+{buffs_html}"""
             scripts.append(("dpsChart", "line", dps_chart, "Sekunden"))
 
         hp_html = ""
@@ -1489,6 +1571,26 @@ class Dashboard(commands.Cog):
                 for h in heals_summary(heals)
             )
             heal_html = f'<div class="card"><h2>Heilung</h2><table><tr><th>Spieler</th><th>Heilungen</th><th>Gesamt</th></tr>{heal_rows}</table></div>'
+
+        attempts_html = ""
+        attempts = data.get("attempts") or []
+        if attempts:
+            skills_map = data.get("skills") or {}
+            blocks = []
+            for i, a in enumerate(attempts):
+                badge = "✅ Kill" if a.get("killed") else "💀 Wipe"
+                dur = a.get("duration_ms")
+                dur_txt = f" · {dur // 60000}:{(dur // 1000) % 60:02d}" if isinstance(dur, (int, float)) else ""
+                inner, spec = render_fight_section(
+                    a.get("players") or [], a.get("timeline") or [], skills_map, f"attemptChart{i}",
+                )
+                if spec:
+                    scripts.append(spec)
+                blocks.append(
+                    f"<details{' open' if i == len(attempts) - 1 else ''}>"
+                    f"<summary>{esc(a['label'])} — {badge}{dur_txt}</summary>{inner}</details>"
+                )
+            attempts_html = f'<div class="card"><h2>Versuche ({len(attempts)})</h2>{"".join(blocks)}</div>'
 
         script_html = ""
         if scripts:
@@ -1544,6 +1646,7 @@ class Dashboard(commands.Cog):
 {hp_html}
 {heal_html}
 {timeline_html}
+{attempts_html}
 {script_html}"""
         return web.Response(text=public_layout(title, body), content_type="text/html")
 

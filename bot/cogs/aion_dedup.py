@@ -186,6 +186,9 @@ def validate_fight_payload(data: dict) -> str | None:
                 return "timeline[].player fehlt"
             if not isinstance(ev.get("damage"), (int, float)):
                 return "timeline[].damage fehlt oder ist keine Zahl"
+            buffs = ev.get("buffs")
+            if buffs is not None and not isinstance(buffs, list):
+                return "timeline[].buffs muss eine Liste sein"
     players_meta = data.get("players_meta")
     if players_meta is not None:
         if not isinstance(players_meta, list):
@@ -220,6 +223,20 @@ def validate_fight_payload(data: dict) -> str | None:
         for meta in skills.values():
             if not isinstance(meta, dict):
                 return "skills[].* muss ein Objekt sein"
+    attempts = data.get("attempts")
+    if attempts is not None:
+        if not isinstance(attempts, list):
+            return "attempts muss eine Liste sein"
+        for a in attempts:
+            if not isinstance(a, dict) or not isinstance(a.get("label"), str) or not a["label"].strip():
+                return "attempts[].label fehlt"
+            if not isinstance(a.get("players"), list) or not a["players"]:
+                return "attempts[].players fehlt oder ist leer"
+            for p in a["players"]:
+                if not isinstance(p, dict) or not isinstance(p.get("name"), str) or not p["name"].strip():
+                    return "attempts[].players[].name fehlt"
+                if not isinstance(p.get("damage"), (int, float)):
+                    return "attempts[].players[].damage fehlt oder ist keine Zahl"
     return None
 
 
@@ -367,6 +384,38 @@ def skill_breakdown(timeline: list[dict], skills: dict[str, dict] | None = None,
             s["skill"] = meta.get("name") or s["key"]
             s["icon"] = meta.get("icon")
         result[name] = ordered
+    return result
+
+
+def buff_uptime(timeline: list[dict], skills: dict[str, dict] | None = None, top: int = 10) -> dict[str, list[dict]]:
+    """Pro Spieler die Top-`top`-Buffs/Debuffs nach Anwesenheits-Rate: an wie viel % der eigenen
+    Treffer dieser Buff aktiv war (`timeline[].buffs`, optionale Liste von Skill-Codes/-Namen je
+    Treffer — anders als `buffSpans` bei AbyssLogs keine durchgehende Zeitspanne, sondern nur die
+    Stichprobe „war es bei diesem Treffer aktiv“, daher eine Rate statt einer echten Uptime-Zeit).
+    `skills` löst Codes in Name + Icon auf, wie bei `skill_breakdown`."""
+    skills = skills or {}
+    hits_per_player: dict[str, int] = {}
+    presence: dict[str, dict[str, int]] = {}
+    for ev in timeline:
+        name = ev.get("player")
+        if not name:
+            continue
+        hits_per_player[name] = hits_per_player.get(name, 0) + 1
+        for buff_key in ev.get("buffs") or []:
+            bucket = presence.setdefault(name, {})
+            bucket[buff_key] = bucket.get(buff_key, 0) + 1
+    result: dict[str, list[dict]] = {}
+    for name, buffs in presence.items():
+        hits = hits_per_player.get(name) or 1
+        ordered = sorted(buffs.items(), key=lambda kv: -kv[1])[:top]
+        rows = []
+        for key, count in ordered:
+            meta = skills.get(key) or {}
+            rows.append({
+                "key": key, "buff": meta.get("name") or key, "icon": meta.get("icon"),
+                "pct": round(100 * count / hits, 1),
+            })
+        result[name] = rows
     return result
 
 
@@ -558,7 +607,7 @@ class AionDedup(commands.Cog):
             "start_ms": int(data["start_ms"]), "fight_ms": int(data["fight_ms"]), "players": data["players"],
             "bosses": data.get("bosses") or [], "timeline": data.get("timeline"),
             "players_meta": data.get("players_meta"), "boss_hp": data.get("boss_hp"), "heals": data.get("heals"),
-            "skills": data.get("skills"),
+            "skills": data.get("skills"), "attempts": data.get("attempts"),
         }
         clusters = self.api_pending.setdefault(guild_id, [])
         for c in clusters:
@@ -586,14 +635,16 @@ class AionDedup(commands.Cog):
         bosses = merge_bosses(cluster.reports)
         players_meta = pick_best_list(cluster.reports, "players_meta")
         timeline = pick_best_list(cluster.reports, "timeline")
+        attempts = pick_best_list(cluster.reports, "attempts")
         extras = {
             "players_meta": players_meta,
             "boss_hp": pick_best_list(cluster.reports, "boss_hp"),
             "heals": pick_best_list(cluster.reports, "heals"),
             "skills": merge_skill_maps(cluster.reports),
+            "attempts": attempts,
         }
         run_id = await self._store_run(cluster.guild_id, cluster.run, players, bosses, timeline, extras, len(cluster.reports)) \
-            if timeline else None
+            if (timeline or attempts) else None
         if bosses:
             await self._update_leaderboard(cluster.guild_id, bosses, players_meta, run_id)
         embed = build_run_embed(cluster.run, players, len(cluster.reports), bosses, run_id=run_id, guild_id=cluster.guild_id)
