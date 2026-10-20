@@ -149,53 +149,53 @@ Abhängigkeiten dafür: `pillow`, `tzdata` in requirements.txt ergänzen.
 Discord erlaubt höchstens 100 Top-Level-Slash-Befehle; neue Funktionen als Gruppen anlegen
 (`/level …`, `/mod …`, `/ticket …`) und die Grenze im Test prüfen.
 
-## Offen: DeckBar-Seite der Gruppen-DPS-Integration
+## DeckBar-Seite der Gruppen-DPS-Integration: auf dem `modular`-Branch umgesetzt
 
-Dave hat mit gamunex (Betreiber von github.com/gamunex/deckbar) abgestimmt, dass DeckBar bei
-Kampfende den Gruppen-Stand an den oben beschriebenen Bot-Webhook schickt (eine PR dorthin, wie
-bei den bisherigen DeckBar-Änderungen von Dave). Noch zu bauen, in `~/Projekte/deckbar` bzw. im
-Fork `Navonex/deckbar`:
+Update 2026-10-20: `capture/src/view.rs` hat seit `deckbar-capture 0.2` das `party: bool`-Feld
+(`combat_power > 0 || gear_score > 0`), und `daemon/deckbar_daemon/bot.py` (gleicher Branch)
+schickt den Gruppen-Stand bei Kampfende per POST an die Bot-Webhook-URL — Payload-Format exakt wie
+von `bot/cogs/dps.py` erwartet (`{"target": …, "duration_s": …, "party": [{"name","cls","dps",
+"dmg","pct"}]}`), geprüft gegen unseren Code. Kein Code auf unserer Seite nötig, nur `/setup
+dps-webhook` ausführen und die URL in DeckBars Bot-Modul (`dps_url`) eintragen, sobald der Branch
+gemergt ist.
 
-- `capture/src/view.rs`: `Row`/`Candidate` um ein `party: bool` ergänzen, aus
-  `PersonalData.combat_power != 0` (siehe `capture/a2tools/src-tauri/src/entity/personal_data.rs`:
-  combat_power kommt nur aus dem Partei-Roster-Paket, 0 = nicht in der eigenen Gruppe). Die
-  aktuelle `build()`-Funktion zeigt aktuell alle erkannten Spieler in der Nähe, nicht nur die
-  eigene Gruppe.
-- `daemon/deckbar_daemon/dps.py`: `DpsFeed.on_combat`-Callback feuert schon bei Kampfende
-  (`active: bool` wird `False`) — dort den letzten Stand (nur `party: true`-Zeilen) per POST an
-  die konfigurierte Bot-Webhook-URL schicken.
-- Neue Einstellung (Webhook-URL) in `dps.yaml` + Web-UI (`daemon/deckbar_daemon/web/`).
-- Payload-Format, das der Bot erwartet: siehe `bot/cogs/dps.py` im thewashbot-Repo
-  (`{"target": …, "duration_s": …, "party": [{"name", "cls", "dps", "dmg", "pct"}]}`).
+## DeckBar-Seite der AION-2-Run-Zusammenführung: auf dem `modular`-Branch umgesetzt
 
-## Offen: DeckBar-Seite der AION-2-Run-Zusammenführung (separates Feature)
+Update 2026-10-20: gamunex hat das auf dem `modular`-Branch (noch nicht in `main` gemergt)
+bereits gebaut — `daemon/deckbar_daemon/bot.py`, Discord-Bot-Modul mit genau diesem Payload
+(`run_payload()`), inklusive Settings/Web-UI (`dps_url`/`runs_url`/`runs_token` in `bot.yaml`) und
+eigenen Tests. Kein Code auf unserer Seite nötig, Format passt exakt gegen unseren bestehenden
+`validate_fight_payload`/`same_api_run` (geprüft, 2026-10-20). Sobald der Branch gemergt ist: nur
+noch `/aion token:True` ausführen und die URL + den Token in DeckBars Bot-Modul eintragen.
 
-Eigenständig von der Gruppen-DPS-Integration oben: Dave will zusätzlich, dass DeckBar nach einem
-abgeschlossenen Dungeon-Lauf (nicht nach jedem Kampf) die Lauf-Daten an `/api/aion/fight`
-(`bot/cogs/dashboard.py` + `bot/cogs/aion_dedup.py`, Auth per Bearer-Token aus `/aion token:True`)
-schickt, damit der Bot mehrere Meldungen vom selben Lauf (verschiedene Spieler, je eigenes DeckBar)
-zu einer Rangliste zusammenführt und einmal postet. Bot-Seite ist fertig, DeckBar-Seite noch offen.
-Bis dahin funktioniert der einfachere Duplikatfilter ohne DeckBar-Änderung (`/aion kanal:`,
-`bot/cogs/aion_dedup.py` on_message) bereits eigenständig.
+**Noch offen, für die Analyse-Seite (`/runs/<id>` im Dashboard, siehe unten):** `run_payload()`
+müsste zusätzlich ein `"timeline"`-Feld mitschicken — eine Liste von Einzeltreffern
+`{"t_ms": …, "player": "…", "skill": "…", "damage": …, "crit": bool, "back": bool}`, `t_ms` relativ
+zum Kampfbeginn. DeckBar hat diese Rohdaten bereits (`bossTimeline`/bzw. die pro-Hit-Events, die
+auch der Mitschnitt selbst sieht) — das ist noch nicht an `bot.py` angebunden. Ohne `timeline`
+funktioniert alles wie bisher (reine Rangliste im Embed), mit `timeline` kommt zusätzlich der
+Analyse-Link dazu.
 
-Ansatzpunkt in DeckBar: `daemon/deckbar_daemon/runs.py`, Funktion `post_discord` wird nach einem
-abgeschlossenen `Run` aufgerufen (siehe `DungeonRuns`-Klasse, Zeile ~928). Dort zusätzlich (nicht
-statt) ein `POST` an die neue Bot-URL mit dem erwarteten Payload:
+## Neu: Analyse-Seite für AION-2-Läufe (`/runs/<id>`)
 
-```json
-{
-  "dungeon": "Ferocious Horn Den", "difficulty": "Normal",
-  "bosses_total": 3, "bosses_killed": 3,
-  "start_ms": 1760445123000, "fight_ms": 350000,
-  "players": [{"name": "ReZero", "damage": 13290000, "dps": 38000}],
-  "bosses": [
-    {"name": "Boss 1", "players": [{"name": "ReZero", "damage": 4200000, "dps": 41000}]}
-  ]
-}
-```
+Ausgelöst durch die Frage, ob man die eigene Zeitleiste gegen eine von außen (z. B.
+[AbyssLogs](https://abysslogs.com), ein community-eigener DPS-Meter/Log-Parser für AION 2) prüfen
+kann — dessen öffentliche API (`api.abysslogs.com/v1`, nicht offiziell dokumentiert, aus dem
+JS-Bundle der Seite ausgelesen) liefert pro Kampf eine volle Hit-für-Hit-Zeitleiste
+(`bossTimeline.events`: `timeMs`, `playerId`, `skillCode`, `damage`, Crit-/Front-Flags). Als Vorbild
+für unsere eigene, einfachere Version genommen.
 
-`bosses` ist optional, bringt aber DPS je Boss statt nur den Gesamtwert fürs Embed — pro Boss aus
-`Run.bosses()` eine `Fight` mit eigener `players`-Liste (gleiches Format wie oben, aber nur für
-diesen einen Kampf). `Run.bosses()` und `Fight.players` liefern die nötigen Werte bereits (siehe
-`Run`/`Fight`/`Player`-Dataclasses in `runs.py`). Neue Einstellung (Bot-URL + Token) in `runs.yaml`
-+ Web-UI ergänzen, analog zum bestehenden `webhook`-Feld dort.
+- `bot/cogs/aion_dedup.py`: `validate_fight_payload` akzeptiert jetzt optional `timeline` (siehe
+  oben), `pick_best_timeline()` wählt bei mehreren Meldungen die mit den meisten Einträgen (keine
+  Event-genaue Fusion mehrerer unabhängiger Mitschnitte), `bucket_dps()`/`timeline_stats()`
+  bauen die Diagramm-Daten bzw. Crit-/Back-Attack-Statistik. `_store_run()` schreibt die
+  (potenziell mehrere MB große) Zeitleiste als Datei unter `<DB_PATH-Ordner>/runs/<id>.json`
+  (Index in der neuen Tabelle `aion_runs`), `cleanup_runs` räumt nach 30 Tagen auf
+  (`RUN_RETENTION_DAYS`). `build_run_embed()` postet bei vorhandener Zeitleiste zusätzlich ein
+  Feld „📊 Analyse" mit dem Link.
+- `bot/cogs/dashboard.py`: neue **öffentliche** Route `/runs/{id}` (bewusst ohne Discord-Login —
+  der Link kommt aus dem Discord-Post, soll ohne Umweg öffnen, wie AbyssLogs' geteilte Logs),
+  zeigt Schaden/DPS pro Spieler und Boss als Balken, bei vorhandener Zeitleiste zusätzlich ein
+  DPS-über-Zeit-Diagramm (Chart.js von cdnjs, nur auf dieser Seite geladen) und die
+  Trefferstatistik. `client_max_size` der Dashboard-App auf 25 MB angehoben (Standard wäre 1 MB,
+  reicht für größere Zeitleisten nicht).

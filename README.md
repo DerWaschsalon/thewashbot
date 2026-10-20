@@ -184,8 +184,8 @@ hier **nicht** möglich — die Spielernamen stehen nur im angehängten Bild, ni
 Statt Discord-Posten zu filtern, schickt DeckBar strukturierte Lauf-Daten (echte Spielernamen,
 Schaden, DPS) an einen Endpunkt auf diesem Server. Der Bot merged mehrere Meldungen desselben
 Laufs zu einer Rangliste und postet einmal selbst ein Embed (🥇🥈🥉-Format). Braucht eine Änderung
-an DeckBar (bei `daemon/deckbar_daemon/runs.py`, dort wo `post_discord` aufgerufen wird), die noch
-nicht umgesetzt ist — siehe `HANDOFF.md`.
+an DeckBar — auf dem `modular`-Branch (github.com/gamunex/deckbar) bereits als eigenes
+Discord-Bot-Modul (`daemon/deckbar_daemon/bot.py`) umgesetzt, Einrichtung dort über die Web-UI.
 
 1. `AION_PUBLIC_URL` in der `.env` setzen (öffentliche Adresse, z. B. per Cloudflare Tunnel auf
    `DASHBOARD_PORT`, ohne Pfad/Slash am Ende) und `/aion kanal:` wie oben einrichten.
@@ -206,12 +206,25 @@ nicht umgesetzt ist — siehe `HANDOFF.md`.
      "bosses": [                                         // optional, für DPS pro Boss
        {"name": "Boss 1", "players": [{"name": "ReZero", "damage": 4200000, "dps": 41000}, …]},
        …
+     ],
+     "timeline": [                                        // optional, für die Analyse-Seite
+       {"t_ms": 1234, "player": "ReZero", "skill": "Arrow of Reckoning",
+        "damage": 41200, "crit": true, "back": false},
+       …
      ]
    }
    ```
 
    `bosses` ist optional — ohne das Feld zeigt das Embed nur die Gesamt-Rangliste, mit dem Feld
    zusätzlich ein eigenes Feld pro Boss mit der DPS je Spieler für genau diesen Kampf.
+
+   `timeline` ist ebenfalls optional (einzelne Treffer mit Zeitstempel in ms seit Kampfbeginn,
+   `player` muss zu einem Namen in `players[]` passen, `skill`/`crit`/`back` sind optional) — damit
+   postet der Bot zusätzlich einen Link „📊 Analyse" auf eine eigene Seite im Web-Dashboard
+   (`/runs/<id>`, kein Login nötig) mit DPS-über-Zeit-Diagramm und Crit-/Back-Attack-Rate pro
+   Spieler. Ohne das Feld bleibt es bei der reinen Rangliste im Embed wie bisher. Melden mehrere
+   Spieler denselben Lauf, nimmt der Bot die Zeitleiste mit den meisten Einträgen, statt mehrere
+   unabhängige Mitschnitte event-genau zusammenzuführen.
 
 Beide Varianten laufen unabhängig nebeneinander — schadet nichts, beide gleichzeitig eingerichtet
 zu haben.

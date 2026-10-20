@@ -76,6 +76,13 @@ CREATE TABLE IF NOT EXISTS level_rewards (
     id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, level INTEGER NOT NULL,
     role_id INTEGER NOT NULL, UNIQUE (guild_id, level)
 );
+-- AION-2-API-Läufe mit Zeitleiste, für die Analyse-Seite (/runs/<id> im Dashboard, siehe
+-- aion_dedup.py). Die eigentlichen (teils mehrere MB großen) Daten liegen als Datei unter
+-- <DB_PATH-Ordner>/runs/<id>.json, hier nur der Index zum Aufräumen/Nachschlagen.
+CREATE TABLE IF NOT EXISTS aion_runs (
+    id TEXT PRIMARY KEY, guild_id INTEGER NOT NULL, created REAL NOT NULL,
+    dungeon TEXT NOT NULL, difficulty TEXT, reporters INTEGER NOT NULL DEFAULT 1
+);
 """
 
 

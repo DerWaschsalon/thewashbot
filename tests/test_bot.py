@@ -29,6 +29,7 @@ def test_all_commands_register():
                 ("Reminders", "check_due"), ("Notifications", "poll_feeds"),
                 ("Bump", "check_due"), ("Stats", "refresh"), ("Birthdays", "check"),
                 ("Announcements", "check_due"), ("VoiceStats", "tick"), ("Giveaways", "check_due"),
+                ("AionDedup", "cleanup_runs"),
             ]:
                 loop = getattr(bot.get_cog(cog_name), loop_name)
                 task = loop.get_task()
@@ -366,6 +367,132 @@ def test_aion_api_merge_and_embed():
     assert "Ferocious Horn Den" in embed.title
     assert "🥇 **ReZero**" in embed.description
     assert "2 DeckBar-Meldung" in embed.footer.text
+
+
+def test_aion_timeline_validation_and_best_pick():
+    from bot.cogs.aion_dedup import pick_best_timeline, validate_fight_payload
+
+    base = {"dungeon": "Fire Temple", "bosses_total": 1, "bosses_killed": 1,
+            "start_ms": 1_760_445_123_000, "fight_ms": 96_000,
+            "players": [{"name": "Xqzmepls", "damage": 5_103_784, "dps": 53_107.4}]}
+
+    valid_tl = [{"t_ms": 0, "player": "Xqzmepls", "damage": 5648, "crit": False, "back": True}]
+    assert validate_fight_payload({**base, "timeline": valid_tl}) is None
+    assert validate_fight_payload({**base, "timeline": "nope"}) is not None  # keine Liste
+    assert validate_fight_payload({**base, "timeline": [{"player": "x"}]}) is not None  # t_ms fehlt
+    assert validate_fight_payload({**base, "timeline": [{"t_ms": 0, "damage": 1}]}) is not None  # player fehlt
+    assert validate_fight_payload({**base, "timeline": [{"t_ms": 0, "player": "x"}]}) is not None  # damage fehlt
+    assert validate_fight_payload(base) is None  # ganz ohne timeline weiterhin gültig (optional)
+
+    short = {**base, "timeline": valid_tl}
+    long_report = {**base, "timeline": valid_tl + [{"t_ms": 500, "player": "Xqzmepls", "damage": 14104}]}
+    assert pick_best_timeline([short, long_report]) == long_report["timeline"]
+    assert pick_best_timeline([base]) is None  # keine Meldung hat überhaupt eine Zeitleiste
+
+
+def test_aion_bucket_dps_and_timeline_stats():
+    from bot.cogs.aion_dedup import bucket_dps, timeline_stats
+
+    timeline = [
+        {"t_ms": 0, "player": "A", "damage": 1000, "crit": True, "back": False},
+        {"t_ms": 500, "player": "A", "damage": 1000, "crit": False, "back": True},
+        {"t_ms": 1500, "player": "A", "damage": 2000, "crit": False, "back": False},
+        {"t_ms": 200, "player": "B", "damage": 500, "crit": False, "back": False},
+    ]
+    chart = bucket_dps(timeline, fight_ms=2000, buckets=2)
+    assert chart["labels_s"] == [1.0, 2.0]
+    # Bucket 0 (0-1000ms): A bekommt 1000+1000=2000 Schaden in 1s -> 2000/s, B 500 Schaden -> 500/s
+    assert chart["series"]["A"][0] == 2000.0
+    assert chart["series"]["B"][0] == 500.0
+    # Bucket 1 (1000-2000ms): nur A mit 2000 Schaden -> 2000/s, B taucht in dem Bucket gar nicht auf
+    assert chart["series"]["A"][1] == 2000.0
+
+    stats = timeline_stats(timeline)
+    assert stats["A"]["hits"] == 3 and stats["A"]["crits"] == 1 and stats["A"]["backs"] == 1
+    assert stats["A"]["crit_pct"] == round(100 / 3, 1)
+    assert stats["B"]["hits"] == 1 and stats["B"]["crit_pct"] == 0.0
+
+
+def test_dashboard_esc_js_and_date_formatting():
+    from bot.cogs.dashboard import datetime_fromtimestamp_de, esc_js
+
+    # "</script>" im JSON-Text darf das umschließende <script>-Tag nicht vorzeitig beenden
+    assert "</script>" not in esc_js('{"name": "</script><script>alert(1)</script>"}')
+
+    assert datetime_fromtimestamp_de(None) == "–"
+    assert datetime_fromtimestamp_de(0) == "–"  # falsy Timestamp -> kein Absturz
+    assert len(datetime_fromtimestamp_de(1_760_000_000)) > 0
+
+
+def test_dashboard_run_page_validates_id_and_404():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.dashboard import Dashboard
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            cog = Dashboard.__new__(Dashboard)
+            cog.db = Database(Path(d) / "t.sqlite3")
+
+            class Req:
+                def __init__(self, rid):
+                    self.match_info = {"id": rid}
+
+            resp = await cog.page_run(Req("bad id with spaces!"))
+            assert resp.status == 400
+
+            resp = await cog.page_run(Req("x" * 20))
+            assert resp.status == 404
+
+    run(go())
+
+
+def test_aion_store_run_and_serve_analysis_page():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.aion_dedup import AionDedup
+    from bot.cogs.dashboard import Dashboard
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+
+            aion_cog = AionDedup.__new__(AionDedup)
+            aion_cog.db = db
+
+            run = {"dungeon": "Fire Temple", "difficulty": "Normal", "bosses_total": 1,
+                   "bosses_killed": 1, "fight_ms": 96_000}
+            players = [{"name": "Xqzmepls", "damage": 5_103_784, "dps": 53_107.4}]
+            timeline = [
+                {"t_ms": 0, "player": "Xqzmepls", "damage": 5648, "crit": False, "back": True},
+                {"t_ms": 500, "player": "Xqzmepls", "damage": 14_104, "crit": True, "back": True},
+            ]
+
+            run_id = await aion_cog._store_run(1, run, players, [], timeline, reporters=1)
+
+            row = await db.fetchone("SELECT * FROM aion_runs WHERE id=?", (run_id,))
+            assert row["dungeon"] == "Fire Temple" and row["guild_id"] == 1
+
+            dash_cog = Dashboard.__new__(Dashboard)
+            dash_cog.db = db
+
+            class Req:
+                match_info = {"id": run_id}
+
+            resp = await dash_cog.page_run(Req())
+            assert resp.status == 200
+            assert "Fire Temple" in resp.text
+            assert "Xqzmepls" in resp.text
+            assert "dpsChart" in resp.text  # Diagramm nur, wenn eine Zeitleiste vorliegt
+
+            await db.close()
+
+    run(go())
 
 
 def test_aion_api_boss_dps():

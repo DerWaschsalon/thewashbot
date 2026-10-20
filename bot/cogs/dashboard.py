@@ -33,9 +33,11 @@ import html
 import json
 import logging
 import os
+import re
 import secrets
 import time
 import urllib.parse
+from datetime import datetime
 
 import aiohttp
 import discord
@@ -189,6 +191,13 @@ table.matrix form { margin: 0; }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
 .chip.ok .dot { background: var(--success); }
 
+.bar-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+.bar-name { width: 120px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { flex: 1; height: 16px; border-radius: 8px; background: rgba(0, 0, 0, 0.3); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 8px; background: linear-gradient(90deg, var(--accent), #8f7cff); }
+.bar-value { width: 140px; flex-shrink: 0; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .bar-name { width: 70px; } .bar-value { width: 100px; font-size: 12px; } }
+
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
 
@@ -233,6 +242,30 @@ def layout(title: str, body: str, *, user: dict | None = None, active: str = "",
 </div>
 <main>{flash_html}<h1>{esc(title)}</h1>{body}</main>
 </body></html>"""
+
+
+def public_layout(title: str, body: str) -> str:
+    """Wie `layout()`, aber ohne Discord-Login/Nav — für Seiten, die über einen geteilten Link
+    erreichbar sein sollen (z. B. `/runs/<id>`)."""
+    return f"""<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{esc(title)} – TheWashBot</title>
+<style>{DASHBOARD_CSS}</style></head><body>
+<div class="top"><div class="brand"><span class="logo"></span>TheWashBot</div></div>
+<main><h1>{esc(title)}</h1>{body}</main>
+</body></html>"""
+
+
+def esc_js(json_text: str) -> str:
+    """JSON für die Einbettung in ein <script>-Tag sichern — ein „</script>“ im Text (z. B. in
+    einem Spielernamen) darf das Tag nicht vorzeitig beenden."""
+    return json_text.replace("</", "<\\/")
+
+
+def datetime_fromtimestamp_de(ts: float | None) -> str:
+    if not ts:
+        return "–"
+    return datetime.fromtimestamp(ts).strftime("%d.%m. %H:%M")
 
 
 def channel_options(guild: discord.Guild, selected: int | None, *, types=(discord.ChannelType.text,)) -> str:
@@ -297,7 +330,9 @@ class Dashboard(commands.Cog):
         self._http: aiohttp.ClientSession | None = None
 
     async def cog_load(self) -> None:
-        app = web.Application(middlewares=[self._error_middleware])
+        # Standard wäre 1 MB — die AION-2-Zeitleiste (siehe aion_dedup.py) kann je nach
+        # Dungeon-Länge mehrere MB groß sein.
+        app = web.Application(middlewares=[self._error_middleware], client_max_size=25 * 1024 * 1024)
         app.add_routes([
             web.get("/login", self.login),
             web.get("/callback", self.callback),
@@ -328,6 +363,7 @@ class Dashboard(commands.Cog):
             web.get("/matrix", self.page_matrix),
             web.post("/matrix/toggle", self.post_matrix_toggle),
             web.post("/api/aion/fight", self.api_aion_fight),
+            web.get("/runs/{id}", self.page_run),
         ])
         self.runner = web.AppRunner(app)
         await self.runner.setup()
@@ -1322,6 +1358,106 @@ class Dashboard(commands.Cog):
         return self._redirect("/matrix", f"{'Sichtbar' if allow else 'Versteckt'}: {channel.name} / {role.name}")
 
     # ---- AION-2-API (eigener Bearer-Token, kein Discord-Login) -----------------------------
+
+    async def page_run(self, request: web.Request) -> web.Response:
+        """Öffentliche Analyse-Seite für einen AION-2-Lauf (`/runs/<id>`, siehe aion_dedup.py) —
+        bewusst ohne Discord-Login: der Link kommt aus dem Discord-Post, jeder mit dem Link soll
+        ihn ohne Umweg öffnen können, wie bei AbyssLogs' geteilten Logs."""
+        run_id = request.match_info["id"]
+        if not re.match(r"^[A-Za-z0-9_-]{10,40}$", run_id):
+            return web.Response(text="Ungültiger Link.", status=400)
+        from .aion_dedup import bucket_dps, runs_dir, timeline_stats
+
+        path = runs_dir(self.db) / f"{run_id}.json"
+        try:
+            data = json.loads(path.read_text())
+        except FileNotFoundError:
+            return web.Response(text="Lauf nicht gefunden — abgelaufen oder falscher Link?", status=404)
+
+        players = data.get("players") or []
+        bosses = data.get("bosses") or []
+        timeline = data.get("timeline") or []
+        fight_ms = data.get("fight_ms") or 0
+        minutes, seconds = divmod(round(fight_ms / 1000), 60)
+        title = data["dungeon"] + (f" ({data['difficulty']})" if data.get("difficulty") else "")
+
+        max_damage = players[0]["damage"] if players else 0
+        player_rows = []
+        for p in players:
+            pct = (100 * p["damage"] / max_damage) if max_damage else 0
+            player_rows.append(
+                f'<div class="bar-row"><span class="bar-name">{esc(p["name"])}</span>'
+                f'<div class="bar-track"><div class="bar-fill" style="width:{pct:.1f}%"></div></div>'
+                f'<span class="bar-value">{p["damage"]:,} ({p["dps"]:.0f}/s)</span></div>'
+            )
+
+        boss_cards = []
+        for b in bosses:
+            boss_players = sorted(b.get("players") or [], key=lambda p: -p["dps"])
+            max_dps = boss_players[0]["dps"] if boss_players else 0
+            rows = []
+            for p in boss_players:
+                pct = (100 * p["dps"] / max_dps) if max_dps else 0
+                rows.append(
+                    f'<div class="bar-row"><span class="bar-name">{esc(p["name"])}</span>'
+                    f'<div class="bar-track"><div class="bar-fill" style="width:{pct:.1f}%"></div></div>'
+                    f'<span class="bar-value">{p["dps"]:.0f}/s</span></div>'
+                )
+            boss_cards.append(f'<div class="card"><h2>🗡️ {esc(b["name"])}</h2>{"".join(rows)}</div>')
+
+        timeline_html = ""
+        if timeline:
+            stats = timeline_stats(timeline)
+            chart = bucket_dps(timeline, fight_ms or 1)
+            stat_rows = "".join(
+                f"<tr><td>{esc(name)}</td><td>{s['hits']}</td><td>{s['crit_pct']}%</td><td>{s['back_pct']}%</td></tr>"
+                for name, s in sorted(stats.items(), key=lambda kv: -kv[1]['damage'])
+            )
+            chart_json = esc_js(json.dumps(chart))
+            timeline_html = f"""
+<div class="card">
+  <h2>DPS über Zeit</h2>
+  <canvas id="dpsChart" height="260"></canvas>
+</div>
+<div class="card">
+  <h2>Trefferstatistik</h2>
+  <table><tr><th>Spieler</th><th>Treffer</th><th>Crit-Rate</th><th>Back-Attack-Rate</th></tr>{stat_rows}</table>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script>
+(function() {{
+  const data = {chart_json};
+  const colours = ["#5ac8fa","#8f7cff","#ff9f0a","#30d158","#ff453a","#f2f3f7","#64d2ff","#bf5af2"];
+  const datasets = Object.keys(data.series).map((name, i) => ({{
+    label: name, data: data.series[name], borderColor: colours[i % colours.length],
+    backgroundColor: "transparent", tension: 0.25, pointRadius: 0, borderWidth: 2,
+  }}));
+  new Chart(document.getElementById("dpsChart"), {{
+    type: "line",
+    data: {{ labels: data.labels_s, datasets }},
+    options: {{
+      scales: {{
+        x: {{ title: {{ display: true, text: "Sekunden", color: "#aaa" }}, ticks: {{ color: "#aaa" }}, grid: {{ color: "rgba(255,255,255,0.08)" }} }},
+        y: {{ ticks: {{ color: "#aaa" }}, grid: {{ color: "rgba(255,255,255,0.08)" }} }},
+      }},
+      plugins: {{ legend: {{ labels: {{ color: "#f2f3f7" }} }} }},
+    }},
+  }});
+}})();
+</script>"""
+
+        reported = datetime_fromtimestamp_de(data.get("created"))
+        body = f"""
+<div class="chips" style="margin-bottom:16px">
+  <span class="chip ok"><span class="dot"></span>{data['bosses_killed']}/{data['bosses_total']} Bosse besiegt</span>
+  <span class="chip"><span class="dot"></span>{minutes}:{seconds:02d} Kampfzeit</span>
+  <span class="chip"><span class="dot"></span>{data.get('reporters', 1)} Meldung(en)</span>
+  <span class="chip"><span class="dot"></span>{reported}</span>
+</div>
+<div class="card"><h2>Schaden gesamt</h2>{"".join(player_rows)}</div>
+{"".join(boss_cards)}
+{timeline_html}"""
+        return web.Response(text=public_layout(title, body), content_type="text/html")
 
     async def api_aion_fight(self, request: web.Request) -> web.Response:
         aion = self.bot.get_cog("AionDedup")
