@@ -72,6 +72,14 @@ def esc(text) -> str:
     return html.escape(str(text if text is not None else ""))
 
 
+def skill_icon_html(icon_url: str | None) -> str:
+    """<img>-Tag für ein Skill-Icon, oder leer. Nur http(s)-URLs zulassen — die URL kommt aus
+    einem fremden Payload (DeckBar), landet aber ungeprüft als src in echtem HTML."""
+    if not icon_url or not re.match(r"^https?://", icon_url):
+        return ""
+    return f'<img src="{esc(icon_url)}" class="skill-icon" alt="">'
+
+
 NAV = [
     ("/", "Übersicht"), ("/general", "Allgemein"), ("/verification", "Verifizierung"),
     ("/automod", "Automod"), ("/warnings", "Verwarnungen"), ("/tickets", "Tickets"),
@@ -192,7 +200,9 @@ table.matrix form { margin: 0; }
 .chip.ok .dot { background: var(--success); }
 
 .bar-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
-.bar-name { width: 120px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-name { width: 120px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            display: flex; align-items: center; gap: 6px; }
+.skill-icon { width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; background: rgba(0, 0, 0, 0.3); }
 .bar-track { flex: 1; height: 16px; border-radius: 8px; background: rgba(0, 0, 0, 0.3); overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 8px; background: linear-gradient(90deg, var(--accent), #8f7cff); }
 .bar-value { width: 140px; flex-shrink: 0; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -1433,14 +1443,16 @@ class Dashboard(commands.Cog):
                 for name, s in sorted(stats.items(), key=lambda kv: -kv[1]["damage"])
             )
 
-            skills = skill_breakdown(timeline)
+            skills_map = data.get("skills") or {}
+            skills = skill_breakdown(timeline, skills_map)
             skill_blocks = []
             for name, skill_list in sorted(skills.items(), key=lambda kv: -sum(s["damage"] for s in kv[1])):
                 if not skill_list:
                     continue
                 max_skill_dmg = skill_list[0]["damage"]
                 skill_rows = "".join(
-                    f'<div class="bar-row"><span class="bar-name">{esc(s["skill"])}</span>'
+                    f'<div class="bar-row">'
+                    f'<span class="bar-name">{skill_icon_html(s.get("icon"))}{esc(s["skill"])}</span>'
                     f'<div class="bar-track"><div class="bar-fill" style="width:{100 * s["damage"] / max_skill_dmg:.1f}%"></div></div>'
                     f'<span class="bar-value">{s["pct"]}% ({s["hits"]}×)</span></div>'
                     for s in skill_list

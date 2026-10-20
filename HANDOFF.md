@@ -199,11 +199,22 @@ für unsere eigene, einfachere Version genommen.
   Zeigt Schaden/DPS pro Spieler (mit Klasse/Ausrüstung aus `players_meta`, falls vorhanden) und
   pro Boss als Balken; bei vorhandener Zeitleiste zusätzlich DPS-über-Zeit-Diagramm,
   Trefferstatistik (Crit-/Back-Attack-/Perfect-/Double-Rate) und eine aufklappbare
-  Skill-Aufschlüsselung pro Spieler; bei `boss_hp` eine HP-über-Zeit-Kurve (Berserk-Zeitpunkt
-  erkennbar); bei `heals` eine Heilungsübersicht. Alle vier Zusatzfelder sind unabhängig
-  voneinander nutzbar — DeckBar kann sie einzeln nachrüsten, nichts davon ist Voraussetzung für
-  ein anderes. Chart.js von cdnjs, nur auf dieser Seite geladen. `client_max_size` der
-  Dashboard-App auf 25 MB angehoben (Standard wäre 1 MB, reicht für größere Zeitleisten nicht).
+  Skill-Aufschlüsselung pro Spieler (mit Icon, wenn über `skills` aufgelöst); bei `boss_hp` eine
+  HP-über-Zeit-Kurve (Berserk-Zeitpunkt erkennbar); bei `heals` eine Heilungsübersicht. Alle
+  Zusatzfelder (`players_meta`/`boss_hp`/`heals`/`skills`) sind unabhängig voneinander nutzbar —
+  DeckBar kann sie einzeln nachrüsten, nichts davon ist Voraussetzung für ein anderes. Chart.js
+  von cdnjs, nur auf dieser Seite geladen. `client_max_size` der Dashboard-App auf 25 MB
+  angehoben (Standard wäre 1 MB, reicht für größere Zeitleisten nicht).
+- **Skill-Namen/-Icons**: `timeline[].skill` kann roher Code oder schon ein Name sein; das neue
+  `skills`-Feld (einmal pro Payload, Schlüssel -> `{name, icon}`, AbyssLogs-Stil — siehe
+  `names.timelineIcons` dort) löst ihn auf, `skill_breakdown()` nutzt das für Anzeigename + Icon,
+  `merge_skill_maps()` vereint die Tabellen mehrerer Meldungen statt nur die größte zu nehmen.
+  `bot/cogs/dashboard.py`: `skill_icon_html()` baut daraus ein `<img>` (nur http(s)-URLs
+  zugelassen, da die URL aus einem fremden Payload kommt). Für gamunex: DeckBars A2Tools-Kern hat
+  diese Auflösung für die eigene Overlay-Anzeige schon (`get_skill_details`/`skill_icons.json` in
+  `daemon/deckbar_daemon/a2ui.py`) — sollte beim Bauen der `timeline` wiederverwendbar sein, ohne
+  eine neue Datenquelle zu brauchen. Ohne `skills` zeigt die Seite einfach den rohen `skill`-Wert
+  ohne Icon, kein Absturz.
 - Getestet (2026-10-20) mit echten Kampfdaten von AbyssLogs (ein öffentliches Beispiel, keine
   eigenen Spielerdaten) als Test-Payload gegen den echten `/api/aion/fight`-Endpunkt auf
   unraid-server — Discord-Post inkl. Analyse-Link und die Seite selbst funktionieren.

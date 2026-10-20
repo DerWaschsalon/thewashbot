@@ -213,6 +213,13 @@ def validate_fight_payload(data: dict) -> str | None:
                 return "heals[].player fehlt"
             if not isinstance(h.get("amount"), (int, float)):
                 return "heals[].amount fehlt oder ist keine Zahl"
+    skills = data.get("skills")
+    if skills is not None:
+        if not isinstance(skills, dict):
+            return "skills muss ein Objekt sein (Skill-Schlüssel -> {name, icon})"
+        for meta in skills.values():
+            if not isinstance(meta, dict):
+                return "skills[].* muss ein Objekt sein"
     return None
 
 
@@ -333,27 +340,46 @@ def timeline_stats(timeline: list[dict]) -> dict[str, dict]:
     return stats
 
 
-def skill_breakdown(timeline: list[dict], top: int = 8) -> dict[str, list[dict]]:
-    """Pro Spieler die Top-`top`-Skills nach Gesamtschaden (Name, Treffer, Schaden, Anteil an
-    dessen Gesamtschaden) — die Skill-Aufschlüsselung, die auf der Analyse-Seite angezeigt wird."""
+def skill_breakdown(timeline: list[dict], skills: dict[str, dict] | None = None, top: int = 8) -> dict[str, list[dict]]:
+    """Pro Spieler die Top-`top`-Skills nach Gesamtschaden (Name, Icon, Treffer, Schaden, Anteil
+    an dessen Gesamtschaden) — die Skill-Aufschlüsselung, die auf der Analyse-Seite angezeigt
+    wird. `skills` löst den rohen `timeline[].skill`-Schlüssel (Code oder schon ein Name) in Name
+    + Icon-URL auf (AbyssLogs-Stil: eine Lookup-Tabelle statt Name/Icon pro Einzelereignis) —
+    fehlt ein Schlüssel darin, wird der rohe Wert selbst als Name angezeigt."""
+    skills = skills or {}
     per_player: dict[str, dict[str, dict]] = {}
     for ev in timeline:
         name = ev.get("player")
         if not name:
             continue
-        skill = str(ev.get("skill") or "–")
+        key = str(ev.get("skill") or "–")
         bucket = per_player.setdefault(name, {})
-        s = bucket.setdefault(skill, {"skill": skill, "hits": 0, "damage": 0.0})
+        s = bucket.setdefault(key, {"key": key, "hits": 0, "damage": 0.0})
         s["hits"] += 1
         s["damage"] += float(ev.get("damage") or 0)
     result: dict[str, list[dict]] = {}
-    for name, skills in per_player.items():
-        total = sum(s["damage"] for s in skills.values()) or 1.0
-        ordered = sorted(skills.values(), key=lambda s: -s["damage"])[:top]
+    for name, bucket in per_player.items():
+        total = sum(s["damage"] for s in bucket.values()) or 1.0
+        ordered = sorted(bucket.values(), key=lambda s: -s["damage"])[:top]
         for s in ordered:
             s["pct"] = round(100 * s["damage"] / total, 1)
+            meta = skills.get(s["key"]) or {}
+            s["skill"] = meta.get("name") or s["key"]
+            s["icon"] = meta.get("icon")
         result[name] = ordered
     return result
+
+
+def merge_skill_maps(reports: list[dict]) -> dict[str, dict]:
+    """Vereint die `skills`-Lookup-Tabellen aller Meldungen (anders als bei den Listen-Feldern
+    sinnvoll zu vereinen statt nur die größte zu nehmen — unterschiedliche Mitschnitte können
+    unterschiedliche Skills aufgelöst haben)."""
+    merged: dict[str, dict] = {}
+    for report in reports:
+        s = report.get("skills")
+        if isinstance(s, dict):
+            merged.update(s)
+    return merged
 
 
 def runs_dir(db) -> Path:
@@ -511,6 +537,7 @@ class AionDedup(commands.Cog):
             "start_ms": int(data["start_ms"]), "fight_ms": int(data["fight_ms"]), "players": data["players"],
             "bosses": data.get("bosses") or [], "timeline": data.get("timeline"),
             "players_meta": data.get("players_meta"), "boss_hp": data.get("boss_hp"), "heals": data.get("heals"),
+            "skills": data.get("skills"),
         }
         clusters = self.api_pending.setdefault(guild_id, [])
         for c in clusters:
@@ -541,6 +568,7 @@ class AionDedup(commands.Cog):
             "players_meta": pick_best_list(cluster.reports, "players_meta"),
             "boss_hp": pick_best_list(cluster.reports, "boss_hp"),
             "heals": pick_best_list(cluster.reports, "heals"),
+            "skills": merge_skill_maps(cluster.reports),
         }
         run_id = await self._store_run(cluster.guild_id, cluster.run, players, bosses, timeline, extras, len(cluster.reports)) \
             if timeline else None

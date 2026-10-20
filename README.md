@@ -208,10 +208,13 @@ Discord-Bot-Modul (`daemon/deckbar_daemon/bot.py`) umgesetzt, Einrichtung dort �
        …
      ],
      "timeline": [                                        // optional, für die Analyse-Seite
-       {"t_ms": 1234, "player": "ReZero", "skill": "Arrow of Reckoning",
+       {"t_ms": 1234, "player": "ReZero", "skill": "18090340",
         "damage": 41200, "crit": true, "back": false, "perfect": false, "double": false},
        …
      ],
+     "skills": {                                           // optional, löst "skill" oben auf
+       "18090340": {"name": "Arrow of Reckoning", "icon": "https://assets.playnccdn.com/…/ICON_RA_SKILL_031.png"}
+     },
      "players_meta": [{"name": "ReZero", "class": "Ranger", "gear_score": 2850, "combat_power": 12500}],  // optional
      "boss_hp": [{"t_ms": 0, "hp_pct": 100.0}, {"t_ms": 5000, "hp_pct": 92.3}, …],  // optional
      "heals": [{"t_ms": 1234, "player": "Priest1", "target": "ReZero", "amount": 8200}, …]  // optional
@@ -226,13 +229,20 @@ Discord-Bot-Modul (`daemon/deckbar_daemon/bot.py`) umgesetzt, Einrichtung dort �
    Bot zusätzlich einen Link „📊 Analyse" auf eine eigene Seite im Web-Dashboard (`/runs/<id>`,
    kein Login nötig, Optik/Umfang an [AbyssLogs](https://abysslogs.com) angelehnt) mit
    DPS-über-Zeit-Diagramm, Trefferstatistik (Crit-/Back-Attack-/Perfect-/Double-Rate) und
-   aufklappbarer Skill-Aufschlüsselung pro Spieler. `players_meta` (Klasse/Ausrüstung), `boss_hp`
-   (HP-Kurve, Berserk-Zeitpunkt erkennbar) und `heals` (Heilungsübersicht) sind jeweils unabhängig
-   nutzbare Zusatzfelder — keines davon ist Voraussetzung für die anderen, die Seite zeigt einfach
-   nur die Abschnitte, für die Daten da sind. `skill` idealerweise schon als lesbarer Name, nicht
-   als Zahlencode — der Bot hat keine eigene Skill-Datenbank zum Auflösen. Melden mehrere Spieler
-   denselben Lauf, nimmt der Bot von jeder Liste die mit den meisten Einträgen, statt mehrere
-   unabhängige Mitschnitte event-genau zusammenzuführen.
+   aufklappbarer Skill-Aufschlüsselung pro Spieler (mit Icon, falls aufgelöst). `skill` kann ein
+   roher Code oder schon ein Name sein — `skills` (einmal pro Payload, nicht pro Einzeltreffer,
+   genau wie AbyssLogs' `timelineIcons`) löst ihn in Name + Icon-URL auf; fehlt ein Eintrag, zeigt
+   die Seite einfach den rohen Wert ohne Icon. DeckBars A2Tools-Kern löst Skill-Icons für die
+   eigene Overlay-Anzeige schon auf (`get_skill_details`/`skill_icons.json` in
+   `daemon/deckbar_daemon/a2ui.py`) — dieselbe Quelle sollte beim Bauen der `timeline` auch die
+   `skills`-Tabelle befüllen können, ohne eine neue Datenquelle zu brauchen.
+   `players_meta` (Klasse/Ausrüstung), `boss_hp` (HP-Kurve, Berserk-Zeitpunkt erkennbar) und
+   `heals` (Heilungsübersicht) sind jeweils unabhängig nutzbare Zusatzfelder — keines davon ist
+   Voraussetzung für die anderen, die Seite zeigt einfach nur die Abschnitte, für die Daten da
+   sind. Melden mehrere Spieler denselben Lauf, nimmt der Bot von jeder Liste die mit den meisten
+   Einträgen (bei `skills`: alle Mitschnitte vereint statt nur den größten genommen — andere
+   Mitschnitte könnten andere Skills aufgelöst haben), statt mehrere unabhängige Mitschnitte
+   event-genau zusammenzuführen.
 
 Beide Varianten laufen unabhängig nebeneinander — schadet nichts, beide gleichzeitig eingerichtet
 zu haben.

@@ -389,6 +389,10 @@ def test_aion_timeline_validation_and_best_pick():
     assert pick_best_timeline([short, long_report]) == long_report["timeline"]
     assert pick_best_timeline([base]) is None  # keine Meldung hat überhaupt eine Zeitleiste
 
+    assert validate_fight_payload({**base, "skills": {"123": {"name": "Fireball"}}}) is None
+    assert validate_fight_payload({**base, "skills": "nope"}) is not None  # kein Objekt
+    assert validate_fight_payload({**base, "skills": {"123": "nope"}}) is not None  # Wert kein Objekt
+
 
 def test_aion_bucket_dps_and_timeline_stats():
     from bot.cogs.aion_dedup import bucket_dps, timeline_stats
@@ -448,6 +452,45 @@ def test_aion_skill_breakdown():
     # top-Begrenzung
     many = [{"t_ms": i, "player": "C", "skill": f"S{i}", "damage": 1} for i in range(20)]
     assert len(skill_breakdown(many, top=5)["C"]) == 5
+
+
+def test_aion_skill_breakdown_resolves_name_and_icon():
+    from bot.cogs.aion_dedup import skill_breakdown
+
+    timeline = [
+        {"t_ms": 0, "player": "A", "skill": "18090340", "damage": 500},
+        {"t_ms": 10, "player": "A", "skill": "unknown-code", "damage": 100},
+    ]
+    skills = {"18090340": {"name": "Arrow of Reckoning", "icon": "https://example.com/icon.png"}}
+    result = skill_breakdown(timeline, skills)
+    by_key = {s["key"]: s for s in result["A"]}
+    assert by_key["18090340"]["skill"] == "Arrow of Reckoning"
+    assert by_key["18090340"]["icon"] == "https://example.com/icon.png"
+    # kein Eintrag in der Lookup-Tabelle -> der rohe Wert wird als Name angezeigt, kein Icon
+    assert by_key["unknown-code"]["skill"] == "unknown-code"
+    assert by_key["unknown-code"]["icon"] is None
+
+
+def test_aion_merge_skill_maps():
+    from bot.cogs.aion_dedup import merge_skill_maps
+
+    reports = [
+        {"skills": {"1": {"name": "A"}, "2": {"name": "B"}}},
+        {"skills": {"2": {"name": "B2"}, "3": {"name": "C"}}},  # überschreibt "2", ergänzt "3"
+        {},  # keine skills -> wird einfach übersprungen
+    ]
+    merged = merge_skill_maps(reports)
+    assert merged == {"1": {"name": "A"}, "2": {"name": "B2"}, "3": {"name": "C"}}
+
+
+def test_dashboard_skill_icon_html_rejects_non_http():
+    from bot.cogs.dashboard import skill_icon_html
+
+    assert skill_icon_html(None) == ""
+    assert skill_icon_html("") == ""
+    assert skill_icon_html("javascript:alert(1)") == ""  # kein http(s) -> kein <img>
+    html_out = skill_icon_html("https://example.com/icon.png")
+    assert html_out.startswith('<img src="https://example.com/icon.png"')
 
 
 def test_aion_boss_hp_series_and_heals_summary():
@@ -537,15 +580,16 @@ def test_aion_store_run_and_serve_analysis_page():
                    "bosses_killed": 1, "fight_ms": 96_000}
             players = [{"name": "Xqzmepls", "damage": 5_103_784, "dps": 53_107.4}]
             timeline = [
-                {"t_ms": 0, "player": "Xqzmepls", "skill": "Arrow of Reckoning", "damage": 5648,
+                {"t_ms": 0, "player": "Xqzmepls", "skill": "18090340", "damage": 5648,
                  "crit": False, "back": True, "perfect": True, "double": False},
-                {"t_ms": 500, "player": "Xqzmepls", "skill": "Arrow of Reckoning", "damage": 14_104,
+                {"t_ms": 500, "player": "Xqzmepls", "skill": "18090340", "damage": 14_104,
                  "crit": True, "back": True, "perfect": False, "double": True},
             ]
             extras = {
                 "players_meta": [{"name": "Xqzmepls", "class": "Ranger", "gear_score": 2850, "combat_power": 12500}],
                 "boss_hp": [{"t_ms": 0, "hp_pct": 100.0}, {"t_ms": 96_000, "hp_pct": 0.0}],
                 "heals": [{"t_ms": 100, "player": "Khai", "target": "Xqzmepls", "amount": 2000}],
+                "skills": {"18090340": {"name": "Arrow of Reckoning", "icon": "https://example.com/icon.png"}},
             }
 
             run_id = await aion_cog._store_run(1, run, players, [], timeline, extras, reporters=1)
@@ -567,7 +611,9 @@ def test_aion_store_run_and_serve_analysis_page():
             assert "Ranger" in resp.text and "GS 2850" in resp.text  # players_meta
             assert "hpChart" in resp.text  # Boss-HP-Diagramm nur, wenn boss_hp vorliegt
             assert "Khai" in resp.text  # Heilungsübersicht
-            assert "Arrow of Reckoning" in resp.text  # Skill-Aufschlüsselung
+            assert "Arrow of Reckoning" in resp.text  # Skill-Aufschlüsselung, Name aus skills aufgelöst
+            assert "18090340" not in resp.text  # roher Code wird nicht mehr angezeigt
+            assert '<img src="https://example.com/icon.png"' in resp.text  # Skill-Icon
 
             await db.close()
 
