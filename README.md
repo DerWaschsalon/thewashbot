@@ -353,3 +353,7 @@ pip install -r requirements.txt pytest
 python -m pytest -q tests          # ohne Discord-Verbindung
 DISCORD_TOKEN=… DB_PATH=./data/bot.sqlite3 python -m bot
 ```
+
+## Lizenz
+
+GNU General Public License v3.0, siehe [LICENSE](LICENSE).
