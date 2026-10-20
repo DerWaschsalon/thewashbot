@@ -524,6 +524,104 @@ def test_aion_pick_best_list_generic():
     assert pick_best_list(reports, "heals") is None
 
 
+def test_aion_leaderboard_rows():
+    from bot.cogs.aion_dedup import leaderboard_rows
+
+    bosses = [
+        {"name": "Boss 1", "players": [{"name": "ReZero", "damage": 100, "dps": 10}]},
+        {"name": "Boss 2", "players": [{"name": "ReZero", "damage": 200, "dps": 20},
+                                        {"name": "Gamunex", "damage": 50, "dps": 5}]},
+    ]
+    players_meta = [{"name": "ReZero", "class": "Ranger"}]
+    rows = leaderboard_rows(bosses, players_meta)
+    assert {"boss": "Boss 1", "player": "ReZero", "class": "Ranger", "damage": 100, "dps": 10} in rows
+    assert {"boss": "Boss 2", "player": "Gamunex", "class": None, "dps": 5, "damage": 50} in rows
+
+    assert leaderboard_rows(bosses, None)[0]["class"] is None  # ohne players_meta: keine Klasse, kein Absturz
+
+
+def test_aion_update_leaderboard_keeps_only_best():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.aion_dedup import AionDedup
+    from bot.db import Database
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+            cog = AionDedup.__new__(AionDedup)
+            cog.db = db
+
+            bosses = [{"name": "Boss 1", "players": [{"name": "ReZero", "damage": 100, "dps": 10}]}]
+            await cog._update_leaderboard(1, bosses, None, "run-a")
+            row = await db.fetchone("SELECT * FROM aion_leaderboard WHERE guild_id=1 AND boss='Boss 1'")
+            assert row["dps"] == 10 and row["run_id"] == "run-a"
+
+            # Schlechterer Lauf -> wird NICHT übernommen
+            worse = [{"name": "Boss 1", "players": [{"name": "ReZero", "damage": 50, "dps": 5}]}]
+            await cog._update_leaderboard(1, worse, None, "run-b")
+            row = await db.fetchone("SELECT * FROM aion_leaderboard WHERE guild_id=1 AND boss='Boss 1'")
+            assert row["dps"] == 10 and row["run_id"] == "run-a"  # unverändert
+
+            # Besserer Lauf -> wird übernommen
+            better = [{"name": "Boss 1", "players": [{"name": "ReZero", "damage": 500, "dps": 50}]}]
+            await cog._update_leaderboard(1, better, None, "run-c")
+            row = await db.fetchone("SELECT * FROM aion_leaderboard WHERE guild_id=1 AND boss='Boss 1'")
+            assert row["dps"] == 50 and row["run_id"] == "run-c"
+
+            await db.close()
+
+    run(go())
+
+
+def test_dashboard_leaderboard_page():
+    import tempfile
+    from pathlib import Path
+
+    from bot.cogs.aion_dedup import AionDedup
+    from bot.cogs.dashboard import Dashboard
+    from bot.db import Database
+
+    class FakeGuild:
+        id = 1
+        name = "Der Waschsalon"
+
+    async def go():
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(Path(d) / "t.sqlite3")
+            await db.connect()
+
+            aion_cog = AionDedup.__new__(AionDedup)
+            aion_cog.db = db
+            bosses = [{"name": "Kromede's Desire", "players": [{"name": "Xqzmepls", "damage": 500, "dps": 50}]}]
+            await aion_cog._update_leaderboard(1, bosses, [{"name": "Xqzmepls", "class": "Ranger"}], "run-x")
+
+            dash_cog = Dashboard.__new__(Dashboard)
+            dash_cog.db = db
+            dash_cog.bot = type("B", (), {"get_guild": lambda self, gid: FakeGuild() if gid == 1 else None})()
+
+            class Req:
+                def __init__(self, gid):
+                    self.match_info = {"guild_id": gid}
+
+            resp = await dash_cog.page_leaderboard(Req("1"))
+            assert resp.status == 200
+            assert "Kromede" in resp.text and "Xqzmepls" in resp.text and "Ranger" in resp.text
+            assert 'href="/runs/run-x"' in resp.text
+
+            resp = await dash_cog.page_leaderboard(Req("999"))  # unbekannte Guild
+            assert resp.status == 404
+
+            resp = await dash_cog.page_leaderboard(Req("not-a-number"))
+            assert resp.status == 400
+
+            await db.close()
+
+    run(go())
+
+
 def test_dashboard_esc_js_and_date_formatting():
     from bot.cogs.dashboard import datetime_fromtimestamp_de, esc_js
 

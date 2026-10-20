@@ -83,6 +83,14 @@ CREATE TABLE IF NOT EXISTS aion_runs (
     id TEXT PRIMARY KEY, guild_id INTEGER NOT NULL, created REAL NOT NULL,
     dungeon TEXT NOT NULL, difficulty TEXT, reporters INTEGER NOT NULL DEFAULT 1
 );
+-- Bestenliste je Boss: bester gemeldeter DPS-Wert pro Spieler (über alle Läufe hinweg), für
+-- /leaderboard/<guild_id> im Dashboard (siehe aion_dedup.py). run_id verlinkt auf die
+-- Analyse-Seite dieses Laufs, falls der eine Zeitleiste hatte (sonst NULL).
+CREATE TABLE IF NOT EXISTS aion_leaderboard (
+    guild_id INTEGER NOT NULL, boss TEXT NOT NULL, player TEXT NOT NULL,
+    class TEXT, damage REAL NOT NULL, dps REAL NOT NULL, run_id TEXT, created REAL NOT NULL,
+    PRIMARY KEY (guild_id, boss, player)
+);
 """
 
 

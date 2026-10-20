@@ -382,6 +382,7 @@ class Dashboard(commands.Cog):
             web.post("/matrix/toggle", self.post_matrix_toggle),
             web.post("/api/aion/fight", self.api_aion_fight),
             web.get("/runs/{id}", self.page_run),
+            web.get("/leaderboard/{guild_id}", self.page_leaderboard),
         ])
         self.runner = web.AppRunner(app)
         await self.runner.setup()
@@ -1545,6 +1546,49 @@ class Dashboard(commands.Cog):
 {timeline_html}
 {script_html}"""
         return web.Response(text=public_layout(title, body), content_type="text/html")
+
+    async def page_leaderboard(self, request: web.Request) -> web.Response:
+        """Öffentliche Bestenliste je Boss (`/leaderboard/<guild_id>`, siehe aion_dedup.py) —
+        bewusst ohne Discord-Login, analog zu `/runs/<id>`. Die Guild-ID ist kein Geheimnis
+        (steht in jedem Invite-Link), ohne Treffer in `aion_leaderboard` ist die Seite einfach leer."""
+        guild_id_raw = request.match_info["guild_id"]
+        if not guild_id_raw.isdigit():
+            return web.Response(text="Ungültiger Link.", status=400)
+        guild_id = int(guild_id_raw)
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return web.Response(text="Unbekannter Server.", status=404)
+
+        rows = await self.db.fetchall(
+            "SELECT boss, player, class, damage, dps, run_id FROM aion_leaderboard "
+            "WHERE guild_id=? ORDER BY boss, dps DESC", (guild_id,),
+        )
+        by_boss: dict[str, list] = {}
+        for r in rows:
+            by_boss.setdefault(r["boss"], []).append(r)
+
+        boss_cards = []
+        for boss, entries in by_boss.items():
+            top = entries[:10]
+            max_dps = top[0]["dps"] if top else 0
+            lines = []
+            for i, r in enumerate(top, start=1):
+                bar_pct = (100 * r["dps"] / max_dps) if max_dps else 0
+                name_html = f'<a href="/runs/{r["run_id"]}">{esc(r["player"])}</a>' if r["run_id"] else esc(r["player"])
+                cls = f' <span class="bar-meta">{esc(r["class"])}</span>' if r["class"] else ""
+                lines.append(
+                    f'<div class="bar-row"><span class="bar-name">#{i} {name_html}{cls}</span>'
+                    f'<div class="bar-track"><div class="bar-fill" style="width:{bar_pct:.1f}%"></div></div>'
+                    f'<span class="bar-value">{r["dps"]:.0f}/s</span></div>'
+                )
+            boss_cards.append(f'<div class="card"><h2>🗡️ {esc(boss)}</h2>{"".join(lines)}</div>')
+
+        body = (
+            f'<div class="chips" style="margin-bottom:16px"><span class="chip ok"><span class="dot"></span>'
+            f'{esc(guild.name)}</span></div>'
+            + ("".join(boss_cards) if boss_cards else '<div class="card hint">Noch keine Läufe gemeldet.</div>')
+        )
+        return web.Response(text=public_layout("🏆 Bestenliste", body), content_type="text/html")
 
     async def api_aion_fight(self, request: web.Request) -> web.Response:
         aion = self.bot.get_cog("AionDedup")

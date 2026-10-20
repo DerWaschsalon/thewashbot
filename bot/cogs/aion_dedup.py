@@ -370,6 +370,20 @@ def skill_breakdown(timeline: list[dict], skills: dict[str, dict] | None = None,
     return result
 
 
+def leaderboard_rows(bosses: list[dict], players_meta: list[dict] | None) -> list[dict]:
+    """Pro Boss und Spieler eine Zeile (Schaden, DPS, Klasse falls bekannt) — Kandidaten fürs
+    Upsert in `aion_leaderboard` (dort gewinnt dann nur, wer den bisherigen Bestwert übertrifft)."""
+    class_by_name = {m["name"]: m.get("class") for m in (players_meta or [])}
+    rows = []
+    for b in bosses:
+        for p in b.get("players") or []:
+            rows.append({
+                "boss": b["name"], "player": p["name"], "class": class_by_name.get(p["name"]),
+                "damage": p["damage"], "dps": p.get("dps") or 0,
+            })
+    return rows
+
+
 def merge_skill_maps(reports: list[dict]) -> dict[str, dict]:
     """Vereint die `skills`-Lookup-Tabellen aller Meldungen (anders als bei den Listen-Feldern
     sinnvoll zu vereinen statt nur die größte zu nehmen — unterschiedliche Mitschnitte können
@@ -389,7 +403,8 @@ def runs_dir(db) -> Path:
 
 
 def build_run_embed(
-    run: dict, players: list[dict], reporters: int, bosses: list[dict] | None = None, run_id: str | None = None
+    run: dict, players: list[dict], reporters: int, bosses: list[dict] | None = None, run_id: str | None = None,
+    guild_id: int | None = None,
 ) -> discord.Embed:
     title = f"⚔️ {run['dungeon']}" + (f" ({run['difficulty']})" if run.get("difficulty") else "")
     max_damage = players[0]["damage"] if players else 0
@@ -410,10 +425,16 @@ def build_run_embed(
             f"**{p['name']}**  `{bar(p['dps'], max_dps, width=8)}`  {fmt_dps(p['dps'])}" for p in boss_players
         ]
         e.add_field(name=f"🗡️ {b['name']}", value="\n".join(boss_lines) or "–", inline=False)
-    if run_id:
+    if run_id or guild_id:
         from .dashboard import dashboard_base_url
 
-        e.add_field(name="📊 Analyse", value=f"[Zeitleiste ansehen]({dashboard_base_url()}/runs/{run_id})", inline=False)
+        base = dashboard_base_url()
+        links = []
+        if run_id:
+            links.append(f"[Zeitleiste ansehen]({base}/runs/{run_id})")
+        if guild_id and bosses:
+            links.append(f"[Bestenliste]({base}/leaderboard/{guild_id})")
+        e.add_field(name="📊 Analyse", value=" · ".join(links), inline=False)
     e.set_footer(text=f"AION-2 · {reporters} DeckBar-Meldung(en) zusammengeführt")
     return e
 
@@ -563,20 +584,38 @@ class AionDedup(commands.Cog):
             return
         players = merge_players(cluster.reports)
         bosses = merge_bosses(cluster.reports)
+        players_meta = pick_best_list(cluster.reports, "players_meta")
         timeline = pick_best_list(cluster.reports, "timeline")
         extras = {
-            "players_meta": pick_best_list(cluster.reports, "players_meta"),
+            "players_meta": players_meta,
             "boss_hp": pick_best_list(cluster.reports, "boss_hp"),
             "heals": pick_best_list(cluster.reports, "heals"),
             "skills": merge_skill_maps(cluster.reports),
         }
         run_id = await self._store_run(cluster.guild_id, cluster.run, players, bosses, timeline, extras, len(cluster.reports)) \
             if timeline else None
-        embed = build_run_embed(cluster.run, players, len(cluster.reports), bosses, run_id=run_id)
+        if bosses:
+            await self._update_leaderboard(cluster.guild_id, bosses, players_meta, run_id)
+        embed = build_run_embed(cluster.run, players, len(cluster.reports), bosses, run_id=run_id, guild_id=cluster.guild_id)
         try:
             await channel.send(embed=embed)
         except discord.HTTPException as e:
             log.warning("AION-API: Posten fehlgeschlagen: %r", e)
+
+    async def _update_leaderboard(
+        self, guild_id: int, bosses: list[dict], players_meta: list[dict] | None, run_id: str | None,
+    ) -> None:
+        created = time.time()
+        for row in leaderboard_rows(bosses, players_meta):
+            await self.db.execute(
+                "INSERT INTO aion_leaderboard (guild_id, boss, player, class, damage, dps, run_id, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, boss, player) DO UPDATE SET "
+                "class=excluded.class, damage=excluded.damage, dps=excluded.dps, "
+                "run_id=excluded.run_id, created=excluded.created "
+                "WHERE excluded.dps > aion_leaderboard.dps",
+                (guild_id, row["boss"], row["player"], row["class"], row["damage"], row["dps"], run_id, created),
+            )
 
     async def _store_run(
         self, guild_id: int, run: dict, players: list[dict], bosses: list[dict],
